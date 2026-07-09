@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mailcouse Admin</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #1c2333;
+  --bg-card: #1c2333;
+  --bg-input: #0d1117;
+  --bg-hover: #252d3f;
+  --border-color: #30363d;
+  --border-light: #21262d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent: #58a6ff;
+  --accent-hover: #79c0ff;
+  --accent-dim: #1f6feb;
+  --success: #3fb950;
+  --success-bg: rgba(63, 185, 80, 0.12);
+  --warning: #d29922;
+  --warning-bg: rgba(210, 153, 34, 0.12);
+  --danger: #f85149;
+  --danger-bg: rgba(248, 81, 73, 0.12);
+  --info: #58a6ff;
+  --info-bg: rgba(88, 166, 255, 0.12);
+  --sidebar-width: 240px;
+  --header-height: 56px;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;background:var(--bg-primary);color:var(--text-primary);font-size:14px;line-height:1.5}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:var(--bg-primary)}
+::-webkit-scrollbar-thumb{background:var(--border-color);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+
+/* Login */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:radial-gradient(ellipse at 50% 0%,var(--bg-tertiary),var(--bg-primary))}
+.login-card{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:40px;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
+.login-card .logo{text-align:center;margin-bottom:32px}
+.login-card .logo i{font-size:40px;color:var(--accent);margin-bottom:8px}
+.login-card .logo h1{font-size:22px;font-weight:600;color:var(--text-primary)}
+.login-card .logo p{font-size:13px;color:var(--text-secondary);margin-top:4px}
+.login-card .form-group{margin-bottom:16px}
+.login-card label{display:block;font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:6px}
+.login-card input{width:100%;padding:10px 14px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);font-size:14px;outline:none;transition:border-color .2s}
+.login-card input:focus{border-color:var(--accent)}
+.login-card .btn{width:100%;padding:10px;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;background:var(--accent-dim);color:#fff;transition:background .2s}
+.login-card .btn:hover{background:var(--accent)}
+.login-card .error{color:var(--danger);font-size:13px;margin-top:8px;display:none}
+
+/* App Layout */
+#app{display:none;height:100vh;overflow:hidden}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-width);background:var(--bg-secondary);border-right:1px solid var(--border-color);display:flex;flex-direction:column;z-index:100;overflow-y:auto}
+.sidebar-header{padding:16px 20px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.sidebar-header i{font-size:22px;color:var(--accent)}
+.sidebar-header h2{font-size:16px;font-weight:600}
+.sidebar-header span{font-size:11px;color:var(--text-muted);display:block}
+.sidebar-nav{flex:1;padding:8px 0;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 20px;cursor:pointer;color:var(--text-secondary);font-size:13px;transition:all .15s;border-left:3px solid transparent;text-decoration:none}
+.nav-item:hover{background:var(--bg-hover);color:var(--text-primary)}
+.nav-item.active{background:var(--info-bg);color:var(--accent);border-left-color:var(--accent);font-weight:500}
+.nav-item i{width:18px;text-align:center;font-size:14px}
+.sidebar-footer{padding:12px 20px;border-top:1px solid var(--border-color);flex-shrink:0}
+.sidebar-footer .btn-logout{display:flex;align-items:center;gap:8px;padding:8px 12px;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:13px;width:100%;transition:all .15s}
+.sidebar-footer .btn-logout:hover{background:var(--danger-bg);color:var(--danger)}
+
+.main-content{margin-left:var(--sidebar-width);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.main-header{display:flex;align-items:center;justify-content:space-between;padding:12px 28px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);height:var(--header-height);flex-shrink:0}
+.main-header h1{font-size:18px;font-weight:600}
+.header-actions{display:flex;gap:8px}
+.header-actions .btn{display:flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;font-size:13px;transition:all .15s}
+.header-actions .btn:hover{background:var(--bg-hover);border-color:var(--text-muted)}
+.header-actions .btn i{font-size:12px}
+.main-body{flex:1;overflow-y:auto;padding:24px 28px}
+
+/* Panel */
+.panel{display:none}
+.panel.active{display:block}
+.panel-description{color:var(--text-secondary);font-size:13px;margin-bottom:20px}
+.panel-actions{margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap}
+.panel-actions .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;font-size:13px;transition:all .15s}
+.panel-actions .btn:hover{background:var(--bg-hover)}
+.panel-actions .btn-primary{background:var(--accent-dim);border-color:var(--accent-dim);color:#fff}
+.panel-actions .btn-primary:hover{background:var(--accent)}
+.panel-actions .btn-danger{background:var(--danger-bg);border-color:transparent;color:var(--danger)}
+.panel-actions .btn-danger:hover{background:var(--danger);color:#fff}
+.panel-actions .btn-success{background:var(--success-bg);border-color:transparent;color:var(--success)}
+.panel-actions .btn-success:hover{background:var(--success);color:#fff}
+.panel-actions .btn-warning{background:var(--warning-bg);border-color:transparent;color:var(--warning)}
+.panel-actions .btn-warning:hover{background:var(--warning);color:#fff}
+
+/* Cards */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:20px}
+.card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius);padding:18px 20px;transition:border-color .2s}
+.card:hover{border-color:var(--text-muted)}
+.card .card-label{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px}
+.card .card-value{font-size:22px;font-weight:600;color:var(--text-primary)}
+.card .card-sub{font-size:12px;color:var(--text-secondary);margin-top:2px}
+.card .card-icon{float:right;font-size:28px;opacity:0.3;color:var(--accent)}
+.card.success .card-value{color:var(--success)}
+.card.warning .card-value{color:var(--warning)}
+.card.danger .card-value{color:var(--danger)}
+.card.info .card-value{color:var(--info)}
+.card-section{margin-bottom:24px}
+.card-section h3{font-size:14px;font-weight:600;margin-bottom:12px;color:var(--text-primary);display:flex;align-items:center;gap:8px}
+.card-section h3 i{color:var(--accent);font-size:16px}
+
+/* Tables */
+.table-wrap{overflow-x:auto;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius);margin-bottom:16px}
+table{width:100%;border-collapse:collapse}
+table th{text-align:left;padding:10px 14px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);background:var(--bg-secondary);border-bottom:1px solid var(--border-color);white-space:nowrap}
+table td{padding:9px 14px;font-size:13px;border-bottom:1px solid var(--border-light);color:var(--text-primary);vertical-align:middle}
+table tr:last-child td{border-bottom:none}
+table tr:hover td{background:var(--bg-hover)}
+table td .actions{display:flex;gap:4px}
+table td .actions .btn-sm{padding:4px 10px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;transition:all .15s}
+table td .actions .btn-sm:hover{background:var(--bg-hover);color:var(--text-primary)}
+table td .actions .btn-sm.danger:hover{background:var(--danger);border-color:var(--danger);color:#fff}
+table td .actions .btn-sm.success:hover{background:var(--success);border-color:var(--success);color:#fff}
+table td .actions .btn-sm.warning:hover{background:var(--warning);border-color:var(--warning);color:#fff}
+table td .actions .btn-sm.info:hover{background:var(--accent-dim);border-color:var(--accent-dim);color:#fff}
+
+/* Badges */
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500}
+.badge-success{background:var(--success-bg);color:var(--success)}
+.badge-warning{background:var(--warning-bg);color:var(--warning)}
+.badge-danger{background:var(--danger-bg);color:var(--danger)}
+.badge-info{background:var(--info-bg);color:var(--info)}
+.badge-muted{background:var(--bg-tertiary);color:var(--text-muted)}
+
+/* Forms */
+.form-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.form-card h3{font-size:14px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.form-card h3 i{color:var(--accent)}
+.form-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}
+.form-group{margin-bottom:0}
+.form-group label{display:block;font-size:12px;font-weight:500;color:var(--text-secondary);margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;outline:none;transition:border-color .2s;font-family:inherit}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--accent)}
+.form-group textarea{min-height:60px;resize:vertical}
+.form-group .error-text{color:var(--danger);font-size:11px;margin-top:2px;display:none}
+.form-group.invalid input,.form-group.invalid select,.form-group.invalid textarea{border-color:var(--danger)}
+.form-submit{margin-top:4px}
+.form-submit .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:500;cursor:pointer;background:var(--accent-dim);color:#fff;transition:background .2s}
+.form-submit .btn:hover{background:var(--accent)}
+.form-submit .btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* Search / Filter bar */
+.filter-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.filter-bar input,.filter-bar select{padding:7px 12px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;outline:none;min-width:180px}
+.filter-bar input:focus,.filter-bar select:focus{border-color:var(--accent)}
+.filter-bar .btn{padding:7px 14px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;font-size:13px;transition:all .15s}
+.filter-bar .btn:hover{background:var(--bg-hover)}
+
+/* Pagination */
+.pagination{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:14px}
+.pagination .btn{padding:6px 14px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;font-size:13px;transition:all .15s}
+.pagination .btn:hover{background:var(--bg-hover)}
+.pagination .btn:disabled{opacity:.4;cursor:not-allowed}
+.pagination span{font-size:13px;color:var(--text-secondary)}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;width:100%;max-width:640px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:modalIn .2s ease}
+@keyframes modalIn{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-color)}
+.modal-header h2{font-size:16px;font-weight:600}
+.modal-header .close-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;padding:4px;transition:color .15s}
+.modal-header .close-btn:hover{color:var(--text-primary)}
+.modal-body{padding:20px}
+.modal-body .detail-row{display:flex;padding:8px 0;border-bottom:1px solid var(--border-light)}
+.modal-body .detail-row:last-child{border-bottom:none}
+.modal-body .detail-label{width:140px;flex-shrink:0;font-size:13px;color:var(--text-muted);font-weight:500}
+.modal-body .detail-value{font-size:13px;color:var(--text-primary);word-break:break-all}
+
+/* Toast */
+.toast-container{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 18px;border-radius:var(--radius-sm);font-size:13px;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,0.3);animation:slideIn .25s ease;display:flex;align-items:center;gap:8px;max-width:400px}
+.toast-success{background:#1a7f37}
+.toast-error{background:#da3633}
+.toast-info{background:var(--accent-dim)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* Loading */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;gap:10px;color:var(--text-muted)}
+.loading i{font-size:20px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-state{display:flex;align-items:center;justify-content:center;padding:32px;gap:8px;color:var(--danger);flex-direction:column}
+.error-state i{font-size:28px}
+.error-state span{font-size:14px}
+.error-state .btn{margin-top:8px;padding:6px 14px;border:1px solid var(--border-color);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;font-size:13px}
+.empty-state{text-align:center;padding:40px;color:var(--text-muted)}
+.empty-state i{font-size:36px;margin-bottom:8px;opacity:.4}
+.empty-state p{font-size:14px}
+.empty-state .sub{font-size:12px;margin-top:4px}
+
+/* Misc */
+.text-right{text-align:right}
+.text-center{text-align:center}
+.mt-8{margin-top:8px}
+.mb-8{margin-bottom:8px}
+.gap-4{gap:4px}
+.flex{display:flex}
+.items-center{align-items:center}
+.truncate{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+pre.config-display{background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:16px;font-size:12px;overflow-x:auto;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word}
+@media(max-width:768px){
+  .sidebar{width:56px}
+  .sidebar-header h2,.sidebar-header span,.nav-item span,.sidebar-footer span{display:none}
+  .sidebar-header{padding:12px;justify-content:center}
+  .nav-item{padding:12px;justify-content:center;border-left:none}
+  .nav-item span{display:none}
+  .sidebar-footer .btn-logout{justify-content:center}
+  .sidebar-footer .btn-logout span{display:none}
+  .main-content{margin-left:56px}
+  .main-body{padding:16px}
+  .card-grid{grid-template-columns:1fr}
+  .form-row{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="logo">
+      <i class="fas fa-envelope-open-text"></i>
+      <h1>Mailcouse</h1>
+      <p>Cold Email Delivery Platform — Admin</p>
+    </div>
+    <div class="form-group">
+      <label for="api-key-input">API Key</label>
+      <input type="password" id="api-key-input" placeholder="Enter your admin API key" autocomplete="off">
+    </div>
+    <button class="btn" id="login-btn" onclick="handleLogin()"><i class="fas fa-lock"></i> Unlock Dashboard</button>
+    <div class="error" id="login-error"></div>
+  </div>
+</div>
+
+<div id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <i class="fas fa-envelope-open-text"></i>
+      <div>
+        <h2>Mailcouse</h2>
+        <span>Admin Panel</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav" id="sidebar-nav"></nav>
+    <div class="sidebar-footer">
+      <button class="btn-logout" onclick="handleLogout()"><i class="fas fa-sign-out-alt"></i><span>Logout</span></button>
+    </div>
+  </aside>
+  <div class="main-content">
+    <header class="main-header">
+      <h1 id="panel-title">Dashboard</h1>
+      <div class="header-actions">
+        <button class="btn" onclick="refreshCurrentPanel()"><i class="fas fa-sync-alt"></i> Refresh</button>
+      </div>
+    </header>
+    <div class="main-body" id="main-body"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Detail</h2>
+      <button class="close-btn" onclick="closeModal()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+const TABS = [
+  { id:'dashboard',     label:'Dashboard',     icon:'fa-tachometer-alt' },
+  { id:'cron-jobs',     label:'Cron Jobs',     icon:'fa-clock' },
+  { id:'domains',       label:'Domains',       icon:'fa-globe' },
+  { id:'subdomains',    label:'Subdomains',    icon:'fa-sitemap' },
+  { id:'ip-pool',       label:'IP Pool',       icon:'fa-network-wired' },
+  { id:'workers',       label:'Workers',       icon:'fa-server' },
+  { id:'templates',     label:'Templates',     icon:'fa-file-alt' },
+  { id:'suppression',   label:'Suppression',   icon:'fa-ban' },
+  { id:'leads',         label:'Leads',         icon:'fa-users' },
+  { id:'warmup',        label:'Warmup',        icon:'fa-thermometer-half' },
+  { id:'reports',       label:'Reports',       icon:'fa-chart-bar' },
+  { id:'dns-provision', label:'DNS / Provision',icon:'fa-cog' },
+  { id:'alerts-health', label:'Alerts / Health',icon:'fa-bell' },
+  { id:'settings',      label:'Settings/Config',icon:'fa-sliders-h' }
+];
+
+let currentTab = 'dashboard';
+let listData = {};
+
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => { if (k==='className') e.className=v; else if (k.startsWith('on')) e[k]=v; else if (k==='innerHTML') e.innerHTML=v; else e.setAttribute(k,v); });
+  children.forEach(c => { if (c!=null) e.append(typeof c==='string' ? document.createTextNode(c) : c); });
+  return e;
+}
+
+function toast(msg, type='success') {
+  const c = $('#toast-container');
+  const t = el('div',{className:'toast toast-'+type}, msg);
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 3000);
+}
+
+function openModal(title, bodyEl) {
+  $('#modal-title').textContent = title;
+  $('#modal-body').innerHTML = '';
+  $('#modal-body').appendChild(bodyEl);
+  $('#modal-overlay').classList.add('open');
+}
+function closeModal() { $('#modal-overlay').classList.remove('open'); }
+$('#modal-overlay').addEventListener('click', e => { if(e.target===e.currentTarget) closeModal(); });
+
+// --- API ---
+async function apiCall(method, endpoint, body) {
+  const key = localStorage.getItem('adminKey');
+  const opts = { method, headers: { 'Authorization':'Bearer '+key, 'Content-Type':'application/json' } };
+  if (body != null) opts.body = JSON.stringify(body);
+  const res = await fetch(endpoint, opts);
+  if (res.status===401 || res.status===403) { handleLogout(); throw new Error('Unauthorized'); }
+  const text = await res.text();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch(e) { return text; }
+}
+
+function badge(status) {
+  if (!status) return '';
+  const s = String(status).toLowerCase();
+  let cls = 'badge-muted';
+  if (['active','enabled','healthy','provisioned','running','ok','true','live','yes'].includes(s)) cls='badge-success';
+  else if (['inactive','disabled','paused','draining','unhealthy','error','false','no','blacklisted','retired'].includes(s)) cls='badge-danger';
+  else if (['pending','warming','limited'].includes(s)) cls='badge-warning';
+  else if (['info'].includes(s)) cls='badge-info';
+  return `<span class="badge ${cls}">${status}</span>`;
+}
+
+function fmtDate(d) {
+  if (!d) return '-';
+  try { return new Date(d).toLocaleString(); } catch(e) { return d; }
+}
+
+function showLoading() { return el('div',{className:'loading'}, el('i',{className:'fas fa-spinner'}), ' Loading...'); }
+function showError(msg, cb) {
+  const c = el('div',{className:'error-state'}, el('i',{className:'fas fa-exclamation-triangle'}), el('span',{}, msg||'Failed to load data'));
+  if (cb) c.appendChild(el('button',{className:'btn',onclick:cb}, el('i',{className:'fas fa-redo'}), ' Retry'));
+  return c;
+}
+function showEmpty(msg, sub) {
+  const c = el('div',{className:'empty-state'}, el('i',{className:'fas fa-inbox'}), el('p',{}, msg||'No data'));
+  if (sub) c.appendChild(el('div',{className:'sub'}, sub));
+  return c;
+}
+
+function table(cols, rows, rowFn) {
+  const wrap = el('div',{className:'table-wrap'});
+  const tbl = el('table');
+  const thead = el('thead'); const tr = el('tr');
+  cols.forEach(c => tr.appendChild(el('th',{}, c)));
+  thead.appendChild(tr); tbl.appendChild(thead);
+  const tbody = el('tbody');
+  if (rows && rows.length) {
+    rows.forEach((r,i) => {
+      const cells = rowFn(r,i);
+      const tr2 = el('tr');
+      cells.forEach(c => tr2.appendChild(el('td',{}, ...(Array.isArray(c)?c:[c]))));
+      tbody.appendChild(tr2);
+    });
+  }
+  tbl.appendChild(tbody); wrap.appendChild(tbl);
+  if (!rows || !rows.length) wrap.appendChild(showEmpty('No rows'));
+  return wrap;
+}
+
+function actionsBtns(arr) {
+  const d = el('div',{className:'actions'});
+  arr.forEach(a => {
+    const b = el('button',{className:'btn-sm'+(a.cls?' '+a.cls:''),onclick:a.fn}, a.html);
+    d.appendChild(b);
+  });
+  return d;
+}
+
+// --- Auth ---
+function handleLogin() {
+  const key = $('#api-key-input').value.trim();
+  if (!key) { showLoginError('Please enter an API key'); return; }
+  localStorage.setItem('adminKey', key);
+  $('#login-error').style.display = 'none';
+  showApp();
+}
+function handleLogout() {
+  localStorage.removeItem('adminKey');
+  currentTab = 'dashboard';
+  $('#app').style.display = 'none';
+  $('#login-screen').style.display = 'flex';
+  $('#api-key-input').value = '';
+  listData = {};
+}
+function showLoginError(msg) {
+  const el2 = $('#login-error');
+  el2.textContent = msg; el2.style.display = 'block';
+}
+
+function showApp() {
+  $('#login-screen').style.display = 'none';
+  $('#app').style.display = 'flex';
+  buildSidebar();
+  switchTab(TABS[0].id);
+}
+function buildSidebar() {
+  const nav = $('#sidebar-nav'); nav.innerHTML = '';
+  TABS.forEach(t => {
+    const d = el('div',{className:'nav-item',onclick:()=>switchTab(t.id)}, el('i',{className:'fas '+t.icon}), el('span',{}, t.label));
+    if (t.id===currentTab) d.classList.add('active');
+    nav.appendChild(d);
+  });
+}
+
+function switchTab(id) {
+  currentTab = id;
+  $$('.nav-item').forEach(n => n.classList.remove('active'));
+  const items = $('#sidebar-nav').children;
+  for (let i=0;i<items.length;i++) { if (TABS[i].id===id) { items[i].classList.add('active'); break; } }
+  const tab = TABS.find(t=>t.id===id);
+  $('#panel-title').textContent = tab ? tab.label : 'Dashboard';
+  refreshCurrentPanel();
+}
+
+function refreshCurrentPanel() {
+  const body = $('#main-body');
+  body.innerHTML = ''; body.appendChild(showLoading());
+  const fn = panelRenderers[currentTab];
+  if (fn) fn(body);
+}
+
+// --- Panel Renderers ---
+const panelRenderers = {};
+
+// 1. Dashboard
+panelRenderers.dashboard = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/dashboard');
+    container.innerHTML = '';
+    if (!data) { container.appendChild(showError('No data from dashboard')); return; }
+
+    const cr = data.cron || {};
+    const sections = [
+      { title:'Health', icon:'fa-heartbeat', items:[
+        { label:'Status', value:data.health?.overall_status || data.status, cls: data.health?.overall_status==='healthy'?'success':'danger' },
+        { label:'Uptime', value:data.health?.uptime || data.uptime || '-' }
+      ]},
+      { title:'Cron Stats', icon:'fa-clock', items:[
+        { label:'Executions', value:cr.stats?.total_executions ?? cr.stats?.total ?? '-' },
+        { label:'Enabled', value:cr.runner?.enabled ?? '-' },
+        { label:'Runner', value:cr.runner?.running ? 'Running' : 'Stopped', cls: cr.runner?.running ? 'success' : 'danger' }
+      ]},
+      { title:'Database', icon:'fa-database', items:[
+        { label:'Connected', value:data.database?.connected ? 'Healthy' : 'Disconnected', cls: data.database?.connected ? 'success' : 'danger' },
+        { label:'Pool Size', value:data.database?.poolSize ?? '-' }
+      ]},
+      { title:'Templates', icon:'fa-file-alt', items:[
+        { label:'Total', value:data.templates?.total ?? '-' },
+        { label:'Industries', value:(data.templates?.by_industry||[]).length ?? '-' }
+      ]},
+      { title:'Suppression', icon:'fa-ban', items:[
+        { label:'Total Suppressed', value:data.suppression?.total_suppressed ?? '-' },
+        { label:'Reasons', value:(data.suppression?.by_reason||[]).length ?? '-' }
+      ]},
+      { title:'Warmup', icon:'fa-thermometer-half', items:[
+        { label:'Active', value:data.warmup?.total_active ?? '-' },
+        { label:'Ready', value:data.warmup?.ready_to_activate ?? '-' }
+      ]},
+      { title:'Workers', icon:'fa-server', items:[
+        { label:'Running', value:data.workers?.running ?? '-' },
+        { label:'Total', value:data.workers?.total ?? '-' }
+      ]}
+    ];
+
+    sections.forEach(s => {
+      const sec = el('div',{className:'card-section'});
+      sec.appendChild(el('h3',{}, el('i',{className:'fas '+s.icon}), ' ', s.title));
+      const grid = el('div',{className:'card-grid'});
+      if (s.items) s.items.forEach(item => {
+        const card = el('div',{className:'card'+(item.cls?' '+item.cls:'')});
+        card.appendChild(el('div',{className:'card-label'}, item.label));
+        card.appendChild(el('div',{className:'card-value'}, String(item.value??'-')));
+        card.appendChild(el('div',{className:'card-sub'}, item.sub||''));
+        grid.appendChild(card);
+      });
+      sec.appendChild(grid);
+      container.appendChild(sec);
+    });
+  } catch(e) {
+    container.innerHTML = '';
+    container.appendChild(showError(e.message, ()=>refreshCurrentPanel()));
+  }
+};
+
+// 2. Cron Jobs
+panelRenderers['cron-jobs'] = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/cron-jobs');
+    container.innerHTML = '';
+    const jobs = Array.isArray(data) ? data : (data?.configs || []);
+    if (!jobs.length) { container.appendChild(showEmpty('No cron jobs found')); return; }
+    container.appendChild(table(
+      ['Name','Schedule','Enabled','Last Run','Actions'],
+      jobs,
+      j => [
+        j.name||j.id,
+        j.schedule||'-',
+        badge(j.enabled ? 'Enabled' : 'Disabled'),
+        fmtDate(j.last_run||j.lastRun),
+        actionsBtns([
+          { html: j.enabled ? '<i class="fas fa-pause"></i> Pause' : '<i class="fas fa-play"></i> Enable',
+            cls: j.enabled?'warning':'success',
+            fn: ()=>toggleCron(j.name||j.id, !j.enabled) },
+          { html:'<i class="fas fa-play"></i> Run', cls:'info', fn: ()=>runCron(j.name||j.id) }
+        ])
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+async function toggleCron(name, enabled) {
+  try { await apiCall('PUT',`/api/admin/cron-jobs/${encodeURIComponent(name)}/toggle`,{enabled}); toast('Cron job updated'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+async function runCron(name) {
+  try { await apiCall('POST',`/api/admin/cron-jobs/${encodeURIComponent(name)}/run`); toast('Cron job triggered'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+
+// 3. Domains
+panelRenderers.domains = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/domains');
+    container.innerHTML = '';
+    const domains = Array.isArray(data) ? data : (data?.domains||[]);
+
+    // create form
+    const fc = el('div',{className:'form-card'});
+    fc.appendChild(el('h3',{}, el('i',{className:'fas fa-plus-circle'}), ' Add Domain'));
+    const fr = el('div',{className:'form-row'});
+    ['domain','industry','registrar'].forEach(f => {
+      const fg = el('div',{className:'form-group'});
+      fg.appendChild(el('label',{}, f.charAt(0).toUpperCase()+f.slice(1)));
+      const inp = el('input',{type:'text',id:'dom-'+f,placeholder:'Enter '+f});
+      fg.appendChild(inp); fr.appendChild(fg);
+    });
+    fc.appendChild(fr);
+    const fs = el('div',{className:'form-submit'});
+    const btn = el('button',{className:'btn',onclick:createDomain}, el('i',{className:'fas fa-plus'}), ' Add Domain');
+    fs.appendChild(btn); fc.appendChild(fs);
+    container.appendChild(fc);
+
+    if (!domains.length) { container.appendChild(showEmpty('No domains')); return; }
+    container.appendChild(table(
+      ['Domain','Industry','Status','DNS Provisioned','Postmaster Score','Created','Actions'],
+      domains,
+      d => [
+        d.domain,
+        d.industry||'-',
+        badge(d.status||'unknown'),
+        badge(d.dns_provisioned ? 'Yes' : 'No'),
+        d.postmaster_score ?? '-',
+        fmtDate(d.created_at||d.createdAt),
+        actionsBtns([
+          { html:'<i class="fas fa-cog"></i> Provision', cls:'info', fn: ()=>provisionDomain(d.id||d._id) },
+          { html:'<i class="fas fa-trash"></i> Retire', cls:'danger', fn: ()=>retireDomain(d.id||d._id) }
+        ])
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+async function createDomain() {
+  const domain = $('#dom-domain')?.value?.trim();
+  const industry = $('#dom-industry')?.value?.trim();
+  const registrar = $('#dom-registrar')?.value?.trim();
+  if (!domain) { toast('Domain is required','error'); return; }
+  try { await apiCall('POST','/api/admin/domains',{domain,industry,registrar}); toast('Domain created'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+async function provisionDomain(id) {
+  try { await apiCall('POST',`/api/admin/domains/${id}/provision`); toast('Provisioning started'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+async function retireDomain(id) {
+  if (!confirm('Retire this domain?')) return;
+  try { await apiCall('DELETE',`/api/admin/domains/${id}`); toast('Domain retired'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+
+// 4. Subdomains
+panelRenderers.subdomains = async function(container) {
+  try {
+    const domainsData = await apiCall('GET','/api/admin/domains');
+    const domains = Array.isArray(domainsData) ? domainsData : (domainsData?.domains||[]);
+    container.innerHTML = '';
+
+    const filterBar = el('div',{className:'filter-bar'});
+    filterBar.appendChild(el('span',{}, 'Parent Domain:'));
+    const sel = el('select',{id:'sub-domain-select'});
+    sel.appendChild(el('option',{value:''}, 'All Domains'));
+    domains.forEach(d => sel.appendChild(el('option',{value:d.id||d._id}, d.domain)));
+    filterBar.appendChild(sel);
+    const selBtn = el('button',{className:'btn',onclick:()=>refreshCurrentPanel()}, el('i',{className:'fas fa-search'}), ' Filter');
+    filterBar.appendChild(selBtn);
+    container.appendChild(filterBar);
+
+    const selectedDomain = sel.value;
+    const ep = selectedDomain ? '/api/admin/subdomains?domain_id='+encodeURIComponent(selectedDomain) : '/api/admin/subdomains';
+    const data = await apiCall('GET',ep);
+    const subs = Array.isArray(data) ? data : (data?.subdomains||[]);
+    if (!subs.length) { container.appendChild(showEmpty('No subdomains')); return; }
+
+    container.appendChild(table(
+      ['Subdomain','Parent','Status','Daily Limit','Warmup Complete','Created','Actions'],
+      subs,
+      s => [
+        s.subdomain||s.name,
+        s.parent_domain||s.parentDomain||'-',
+        badge(s.status||'unknown'),
+        s.daily_limit??'-',
+        s.warmup_complete != null ? (s.warmup_complete ? badge('Yes') : badge('No')) : '-',
+        fmtDate(s.created_at||s.createdAt),
+        actionsBtns([
+          { html:'<i class="fas fa-play"></i> Activate', cls:'success', fn: ()=>subAction(s.id||s._id,'activate') },
+          { html:'<i class="fas fa-pause"></i> Pause', cls:'warning', fn: ()=>subAction(s.id||s._id,'pause') },
+          { html:'<i class="fas fa-redo"></i> Resume', cls:'info', fn: ()=>subAction(s.id||s._id,'resume') }
+        ])
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+async function subAction(id, action) {
+  try { await apiCall('POST',`/api/admin/subdomains/${id}/${action}`); toast('Action performed: '+action); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+
+// 5. IP Pool
+panelRenderers['ip-pool'] = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/ips');
+    container.innerHTML = '';
+    const ips = Array.isArray(data) ? data : (data?.ips||[]);
+
+    const pa = el('div',{className:'panel-actions'});
+    const replaceBtn = el('button',{className:'btn btn-warning',onclick:replaceIps}, el('i',{className:'fas fa-exchange-alt'}), ' Replace IPs');
+    pa.appendChild(replaceBtn);
+    container.appendChild(pa);
+
+    if (!ips.length) { container.appendChild(showEmpty('No IPs in pool')); return; }
+    container.appendChild(table(
+      ['IP','Server','Status','Blacklisted','Priority'],
+      ips,
+      ip => [
+        ip.ip||ip.address,
+        ip.server||'-',
+        badge(ip.status||'unknown'),
+        ip.blacklisted ? badge('Blacklisted') : badge('Clean'),
+        ip.priority??'-'
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+async function replaceIps() {
+  if (!confirm('Replace IP pool?')) return;
+  try { await apiCall('POST','/api/admin/ips/replace'); toast('IPs replaced'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+
+// 6. Workers
+panelRenderers.workers = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/workers');
+    container.innerHTML = '';
+    const workers = Array.isArray(data) ? data : (data?.workers||[]);
+    if (!workers.length) { container.appendChild(showEmpty('No workers')); return; }
+    container.appendChild(table(
+      ['Worker ID','Machine','IP','Provider','Status','Started','Actions'],
+      workers,
+      w => [
+        w.id||w.worker_id||w.name,
+        w.machine||'-',
+        w.ip||'-',
+        w.provider||'-',
+        badge(w.status||'unknown'),
+        fmtDate(w.started_at||w.startedAt||w.started),
+        actionsBtns([
+          { html:'<i class="fas fa-drain"></i> Drain', cls:'warning', fn: ()=>workerAction(w.id||w.worker_id,'drain') },
+          { html:'<i class="fas fa-sync"></i> Rotate', cls:'info', fn: ()=>workerAction(w.id||w.worker_id,'rotate') }
+        ])
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+async function workerAction(id, action) {
+  try { await apiCall('POST',`/api/admin/workers/${id}/${action}`); toast('Worker '+action+' triggered'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+
+// 7. Templates
+panelRenderers.templates = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/templates');
+    container.innerHTML = '';
+    const templates = Array.isArray(data) ? data : (data?.templates||[]);
+
+    const fc = el('div',{className:'form-card'});
+    fc.appendChild(el('h3',{}, el('i',{className:'fas fa-plus-circle'}), ' Create Template'));
+    const fr = el('div',{className:'form-row'});
+    const fields = [
+      {id:'tpl-name',label:'Name'},
+      {id:'tpl-industry',label:'Industry'},
+      {id:'tpl-format',label:'Format'},
+      {id:'tpl-length_tier',label:'Length Tier'}
+    ];
+    fields.forEach(f => {
+      const fg = el('div',{className:'form-group'});
+      fg.appendChild(el('label',{}, f.label));
+      fg.appendChild(el('input',{type:'text',id:f.id,placeholder:'Enter '+f.label}));
+      fr.appendChild(fg);
+    });
+    fc.appendChild(fr);
+
+    const fr2 = el('div',{className:'form-row'});
+    ['subject_spintax','body_spintax'].forEach(f => {
+      const fg = el('div',{className:'form-group',style:'grid-column:1/-1'});
+      fg.appendChild(el('label',{}, f.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())));
+      fg.appendChild(el('textarea',{id:'tpl-'+f,placeholder:'Enter '+f.replace('_',' ')}));
+      fr2.appendChild(fg);
+    });
+    fc.appendChild(fr2);
+    const fs = el('div',{className:'form-submit'});
+    const btn = el('button',{className:'btn',onclick:createTemplate}, el('i',{className:'fas fa-plus'}), ' Create Template');
+    fs.appendChild(btn); fc.appendChild(fs);
+    container.appendChild(fc);
+
+    if (!templates.length) { container.appendChild(showEmpty('No templates')); return; }
+    container.appendChild(table(
+      ['Name','Industry','Format','Length Tier','Version'],
+      templates,
+      t => [
+        el('a',{style:'cursor:pointer;color:var(--accent);text-decoration:none',onclick:()=>viewTemplate(t.id||t._id)}, t.name),
+        t.industry||'-',
+        t.format||'-',
+        t.length_tier||t.lengthTier||'-',
+        t.version??'-'
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+async function createTemplate() {
+  const name = $('#tpl-name')?.value?.trim();
+  if (!name) { toast('Name is required','error'); return; }
+  const body = {
+    name,
+    industry: $('#tpl-industry')?.value?.trim(),
+    subject_spintax: $('#tpl-subject_spintax')?.value?.trim(),
+    body_spintax: $('#tpl-body_spintax')?.value?.trim(),
+    format: $('#tpl-format')?.value?.trim(),
+    length_tier: $('#tpl-length_tier')?.value?.trim()
+  };
+  try { await apiCall('POST','/api/admin/templates',body); toast('Template created'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+async function viewTemplate(id) {
+  try {
+    const t = await apiCall('GET',`/api/admin/templates/${id}`);
+    if (!t) { toast('Template not found','error'); return; }
+    const dl = el('div');
+    const fields = ['id','name','industry','format','length_tier','lengthTier','subject_spintax','body_spintax','version','created_at','createdAt'];
+    fields.forEach(f => {
+      if (t[f] != null) {
+        const row = el('div',{className:'detail-row'});
+        row.appendChild(el('span',{className:'detail-label'}, f.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())));
+        const val = f.includes('spintax') ? el('pre',{style:'white-space:pre-wrap;font-size:12px;margin:0'}, String(t[f])) : document.createTextNode(String(t[f]));
+        row.appendChild(el('span',{className:'detail-value'}, val));
+        dl.appendChild(row);
+      }
+    });
+    openModal('Template: '+(t.name||id), dl);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+// 8. Suppression
+panelRenderers.suppression = async function(container) {
+  try {
+    container.innerHTML = '';
+
+    // Search + Add
+    const fb = el('div',{className:'filter-bar'});
+    fb.appendChild(el('span',{}, 'Search:'));
+    const searchInput = el('input',{type:'text',id:'sup-search',placeholder:'Search by email...'});
+    fb.appendChild(searchInput);
+    const searchBtn = el('button',{className:'btn',onclick:()=>refreshCurrentPanel()}, el('i',{className:'fas fa-search'}), ' Search');
+    fb.appendChild(searchBtn);
+    container.appendChild(fb);
+
+    const fc = el('div',{className:'form-card',style:'display:flex;align-items:end;gap:12px;flex-wrap:wrap'});
+    fc.appendChild(el('h3',{style:'width:100%;margin-bottom:8px;font-size:14px;font-weight:600'}, el('i',{className:'fas fa-plus-circle',style:'color:var(--accent)'}), ' Add Suppression'));
+    const fg1 = el('div',{className:'form-group',style:'flex:1;min-width:200px'});
+    fg1.appendChild(el('label',{}, 'Email'));
+    fg1.appendChild(el('input',{type:'email',id:'sup-email',placeholder:'email@example.com'}));
+    fc.appendChild(fg1);
+    const fg2 = el('div',{className:'form-group',style:'flex:1;min-width:200px'});
+    fg2.appendChild(el('label',{}, 'Reason'));
+    fg2.appendChild(el('input',{type:'text',id:'sup-reason',placeholder:'bounce, complaint, etc'}));
+    fc.appendChild(fg2);
+    const addBtn = el('button',{className:'btn',style:'margin-bottom:0;padding:8px 18px;border:none;border-radius:4px;background:var(--accent-dim);color:#fff;cursor:pointer',onclick:addSuppression}, el('i',{className:'fas fa-plus'}), ' Add');
+    fc.appendChild(addBtn);
+    container.appendChild(fc);
+
+    const searchTerm = $('#sup-search')?.value?.trim();
+    const ep = searchTerm ? '/api/admin/suppression?search='+encodeURIComponent(searchTerm) : '/api/admin/suppression';
+    const data = await apiCall('GET',ep);
+    const items = Array.isArray(data) ? data : (data?.entries||data?.items||[]);
+    if (!items.length) { container.appendChild(showEmpty('No suppressed emails')); return; }
+    container.appendChild(table(
+      ['Email','Reason','Created','Actions'],
+      items,
+      s => [
+        s.email,
+        s.reason||'-',
+        fmtDate(s.created_at||s.createdAt),
+        actionsBtns([{ html:'<i class="fas fa-trash"></i> Remove', cls:'danger', fn: ()=>removeSuppression(s.email) }])
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+async function addSuppression() {
+  const email = $('#sup-email')?.value?.trim();
+  const reason = $('#sup-reason')?.value?.trim();
+  if (!email) { toast('Email is required','error'); return; }
+  try { await apiCall('POST','/api/admin/suppression',{email,reason}); toast('Email suppressed'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+async function removeSuppression(email) {
+  if (!confirm('Remove suppression for '+email+'?')) return;
+  try { await apiCall('DELETE',`/api/admin/suppression/${encodeURIComponent(email)}`); toast('Suppression removed'); refreshCurrentPanel(); }
+  catch(e) { toast(e.message,'error'); }
+}
+
+// 9. Leads
+panelRenderers.leads = async function(container) {
+  try {
+    container.innerHTML = '';
+    const page = listData.leadsPage || 1;
+    const limit = 50;
+    const industryFilter = listData.leadsIndustry || '';
+    const statusFilter = listData.leadsStatus || '';
+
+    const fb = el('div',{className:'filter-bar'});
+    fb.appendChild(el('span',{}, 'Industry:'));
+    const indInput = el('input',{type:'text',id:'leads-industry',placeholder:'Filter by industry',value:industryFilter});
+    fb.appendChild(indInput);
+    fb.appendChild(el('span',{}, 'Status:'));
+    const statInput = el('input',{type:'text',id:'leads-status',placeholder:'Filter by status',value:statusFilter});
+    fb.appendChild(statInput);
+    const filterBtn = el('button',{className:'btn',onclick:()=>{
+      listData.leadsIndustry = $('#leads-industry')?.value?.trim();
+      listData.leadsStatus = $('#leads-status')?.value?.trim();
+      listData.leadsPage = 1;
+      refreshCurrentPanel();
+    }}, el('i',{className:'fas fa-filter'}), ' Filter');
+    fb.appendChild(filterBtn);
+    container.appendChild(fb);
+
+    let ep = `/api/admin/leads?page=${page}&limit=${limit}`;
+    if (industryFilter) ep += '&industry='+encodeURIComponent(industryFilter);
+    if (statusFilter) ep += '&status='+encodeURIComponent(statusFilter);
+    const data = await apiCall('GET',ep);
+    const leads = Array.isArray(data) ? data : (data?.leads||data?.items||[]);
+    if (!leads.length) { container.appendChild(showEmpty('No leads found')); return; }
+    container.appendChild(table(
+      ['Email','Industry','Status','Created'],
+      leads,
+      l => [l.email, l.industry||'-', badge(l.status), fmtDate(l.created_at||l.createdAt)]
+    ));
+    const pg = el('div',{className:'pagination'});
+    const prevBtn = el('button',{className:'btn',disabled:page<=1,onclick:()=>{listData.leadsPage=Math.max(1,page-1);refreshCurrentPanel()}}, el('i',{className:'fas fa-chevron-left'}), ' Prev');
+    pg.appendChild(prevBtn);
+    pg.appendChild(el('span',{}, 'Page '+page));
+    const nextBtn = el('button',{className:'btn',onclick:()=>{listData.leadsPage=page+1;refreshCurrentPanel()}}, 'Next ', el('i',{className:'fas fa-chevron-right'}));
+    pg.appendChild(nextBtn);
+    container.appendChild(pg);
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+
+// 10. Warmup
+panelRenderers.warmup = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/warmup');
+    container.innerHTML = '';
+    if (!data) { container.appendChild(showError('No warmup data')); return; }
+
+    const sections = [
+      { title:'Gate Stats', icon:'fa-door-open', items: data.gate },
+      { title:'Warmup Stats', icon:'fa-thermometer-half', items: data.warmup },
+      { title:'Activation Stats', icon:'fa-rocket', items: data.activation }
+    ];
+
+    sections.forEach(s => {
+      if (!s.items) return;
+      const sec = el('div',{className:'card-section'});
+      sec.appendChild(el('h3',{}, el('i',{className:'fas '+s.icon}), ' ', s.title));
+      const grid = el('div',{className:'card-grid'});
+      Object.entries(s.items).forEach(([k,v]) => {
+        const card = el('div',{className:'card'});
+        card.appendChild(el('div',{className:'card-label'}, k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())));
+        card.appendChild(el('div',{className:'card-value'}, String(v??'-')));
+        grid.appendChild(card);
+      });
+      sec.appendChild(grid);
+      container.appendChild(sec);
+    });
+    if (!sections.some(s=>s.items)) {
+      const grid = el('div',{className:'card-grid'});
+      Object.entries(data).forEach(([k,v]) => {
+        if (typeof v !== 'object') {
+          const card = el('div',{className:'card'});
+          card.appendChild(el('div',{className:'card-label'}, k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())));
+          card.appendChild(el('div',{className:'card-value'}, String(v??'-')));
+          grid.appendChild(card);
+        }
+      });
+      container.appendChild(grid);
+    }
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+
+// 11. Reports
+panelRenderers.reports = async function(container) {
+  try {
+    container.innerHTML = '';
+    const typeFilter = listData.reportsType || '';
+    const fb = el('div',{className:'filter-bar'});
+    fb.appendChild(el('span',{}, 'Type:'));
+    const typeInput = el('input',{type:'text',id:'reports-type',placeholder:'Filter by type',value:typeFilter});
+    fb.appendChild(typeInput);
+    const filterBtn = el('button',{className:'btn',onclick:()=>{listData.reportsType=$('#reports-type')?.value?.trim();refreshCurrentPanel()}}, el('i',{className:'fas fa-filter'}), ' Filter');
+    fb.appendChild(filterBtn);
+    container.appendChild(fb);
+
+    let ep = '/api/admin/reports';
+    if (typeFilter) ep += '?type='+encodeURIComponent(typeFilter);
+    const data = await apiCall('GET',ep);
+    const reports = Array.isArray(data) ? data : (data?.reports||data?.items||[]);
+    if (!reports.length) { container.appendChild(showEmpty('No reports')); return; }
+    container.appendChild(table(
+      ['Type','Data','Created'],
+      reports,
+      r => [
+        badge(r.type||r.report_type),
+        el('span',{className:'truncate',title:typeof r.data==='string'?r.data:JSON.stringify(r.data)}, typeof r.data==='string'?r.data:JSON.stringify(r.data)),
+        fmtDate(r.created_at||r.createdAt)
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+
+// 12. DNS / Provision
+panelRenderers['dns-provision'] = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/domains');
+    container.innerHTML = '';
+    const domains = Array.isArray(data) ? data : (data?.domains||[]);
+    if (!domains.length) { container.appendChild(showEmpty('No domains to provision')); return; }
+    container.appendChild(table(
+      ['Domain','Status','DNS Provisioned','Actions'],
+      domains,
+      d => [
+        d.domain,
+        badge(d.status||'unknown'),
+        d.dns_provisioned ? badge('Provisioned') : badge('Not Provisioned'),
+        d.dns_provisioned ? el('span',{style:'color:var(--text-muted);font-size:12px'}, 'Provisioned') : actionsBtns([
+          { html:'<i class="fas fa-cog"></i> Provision Now', cls:'info', fn: ()=>provisionDomain(d.id||d._id) }
+        ])
+      ]
+    ));
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+
+// 13. Alerts / Health
+panelRenderers['alerts-health'] = async function(container) {
+  try {
+    const data = await apiCall('GET','/api/admin/health');
+    container.innerHTML = '';
+    if (!data) { container.appendChild(showError('No health data')); return; }
+
+    const overallStatus = data.overall_status || data.overallStatus || data.status || 'unknown';
+    const grid = el('div',{className:'card-grid'});
+    const statusCard = el('div',{className:'card '+(overallStatus==='healthy'?'success':overallStatus==='degraded'?'warning':'danger')});
+    statusCard.appendChild(el('div',{className:'card-label'}, 'Overall Status'));
+    statusCard.appendChild(el('div',{className:'card-value'}, overallStatus.toUpperCase()));
+    grid.appendChild(statusCard);
+
+    const uptimeCard = el('div',{className:'card'});
+    uptimeCard.appendChild(el('div',{className:'card-label'}, 'Uptime'));
+    uptimeCard.appendChild(el('div',{className:'card-value'}, data.uptime||data.uptime_seconds||'-'));
+    grid.appendChild(uptimeCard);
+    container.appendChild(grid);
+
+    const checks = data.checks || data.results || [];
+    if (Array.isArray(checks) && checks.length) {
+      container.appendChild(el('h3',{style:'font-size:14px;font-weight:600;margin:16px 0 10px', innerHTML:'<i class="fas fa-list" style="color:var(--accent)"></i> Check Results'}));
+      container.appendChild(table(
+        ['Check','Status','Detail'],
+        checks,
+        c => [
+          c.name||c.check||c.service,
+          badge(c.status||c.passed?'Passed':'Failed'),
+          c.message||c.detail||c.error||'-'
+        ]
+      ));
+    } else {
+      // render flat non-object keys as checks
+      const items = [];
+      Object.entries(data).forEach(([k,v]) => {
+        if (!['overall_status','overallStatus','status','uptime','uptime_seconds'].includes(k) && typeof v !== 'object') {
+          items.push({name:k,status:v});
+        }
+      });
+      if (items.length) {
+        container.appendChild(el('h3',{style:'font-size:14px;font-weight:600;margin:16px 0 10px', innerHTML:'<i class="fas fa-list" style="color:var(--accent)"></i> Health Checks'}));
+        container.appendChild(table(['Check','Status'], items, c => [c.name, badge(c.status)]));
+      }
+    }
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+
+// 14. Settings / Config
+panelRenderers.settings = async function(container) {
+  try {
+    const raw = await apiCall('GET','/api/admin/config');
+    container.innerHTML = '';
+    const data = raw?.config || raw;
+    if (!data) { container.appendChild(showError('No config data')); return; }
+
+    const grid = el('div',{className:'card-grid'});
+    const configEntries = [];
+    Object.entries(data).forEach(([k,v]) => {
+      if (typeof v !== 'object') {
+        const card = el('div',{className:'card'});
+        card.appendChild(el('div',{className:'card-label'}, k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())));
+        const strVal = String(v);
+        const isSecret = /secret|key|password|token|api.?key/i.test(k);
+        card.appendChild(el('div',{className:'card-value',style:'font-size:16px'}, isSecret ? strVal.slice(0,4)+'****'+strVal.slice(-4) : strVal));
+        grid.appendChild(card);
+      } else {
+        configEntries.push({key:k,value:v});
+      }
+    });
+    container.appendChild(grid);
+
+    configEntries.forEach(entry => {
+      const sec = el('div',{className:'card-section'});
+      sec.appendChild(el('h3',{}, el('i',{className:'fas fa-cog'}), ' ', entry.key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())));
+      const pre = el('pre',{className:'config-display'}, JSON.stringify(entry.value, null, 2)
+        .replace(/"([^"]{4,})":\s*"([^"]{8,})"/g, (m,k,v) => {
+          if (/secret|key|password|token|api.?key/i.test(k)) return `"${k}": "${v.slice(0,4)}****${v.slice(-4)}"`;
+          return m;
+        }));
+      sec.appendChild(pre);
+      container.appendChild(sec);
+    });
+  } catch(e) { container.innerHTML=''; container.appendChild(showError(e.message,()=>refreshCurrentPanel())); }
+};
+
+// --- Init ---
+document.addEventListener('DOMContentLoaded', () => {
+  $('#api-key-input').addEventListener('keydown', e => { if (e.key==='Enter') handleLogin(); });
+  const key = localStorage.getItem('adminKey');
+  if (key) { showApp(); }
+});
+</script>
+</body>
+</html>

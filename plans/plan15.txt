@@ -1,0 +1,111 @@
+================================================================================
+PLAN 15 — BOUNCE PROCESSING
+TSD Step 15: Bounce Processing
+================================================================================
+
+OBJECTIVE
+---------
+Receive, parse, and classify all delivery failure notifications via MX records.
+Automatically suppress bounced addresses and prevent them from receiving
+another email under any circumstance.
+
+SOURCE COMPONENTS USED
+----------------------
+- go-sisimai/                    — Bounce parsing: 61 MTA parsers, 34 bounce reasons
+- postal/bounce handling         — Suppression list with auto-removal
+
+IMPLEMENTATION TASKS
+--------------------
+1. Bounce handler infrastructure:
+   - Dedicated server with public IP
+   - MX record on each subdomain: bounce.{BOUNCE_SERVER_DOMAIN}
+   - Receives all delivery failure notifications
+   - Processes in real time
+
+2. Bounce classification (using go-sisimai patterns):
+   - HARD BOUNCE (permanent — never retry):
+     - SMTP codes: 550, 551, 553, 554
+     - Action: suppress instantly, reason = 'hard_bounce'
+     - Never retry under any circumstance
+
+   - SOFT BOUNCE (temporary — retry with limits):
+     - SMTP codes: 421, 450, 451, 452
+     - Action: requeue with 24-hour delay, max 2 retries
+     - After 3rd failure: permanent, reason = 'soft_bounce'
+
+   - POLICY BLOCK:
+     - SMTP code: 550 5.7.x
+     - Action: suppress + flag sending subdomain for review
+     - Permanent — review subdomain before reactivating
+
+   - MAILBOX FULL:
+     - SMTP code: 452 4.2.2
+     - Action: retry after 24 hours, 2 attempts only
+     - After 3rd failure: permanent
+
+   - SPAM BLOCK:
+     - SMTP codes: 521, 550 spam
+     - Action: suppress + remove sending IP from active pool
+     - Permanent — review IP reputation
+
+3. Bounce processing pipeline:
+   - Receive bounce notification via MX
+   - Parse using go-sisimai (or equivalent):
+     - Extract: recipient address, bounce reason, diagnostic code
+     - Classify: hard/soft/policy/full/spam
+   - Match to original send_job (by message-id or recipient)
+   - Add to suppression_list with appropriate reason
+   - Update subdomains.bounce_count
+   - Update domains.bounce_rate_7d
+
+4. Suppression integration:
+   - Bounced address → add to suppression_list immediately
+   - Reason: hard_bounce or soft_bounce (based on classification)
+   - source_subdomain_id: which subdomain triggered suppression
+   - suppressed_at: timestamp (never modified after creation)
+
+5. Domain bounce rate tracking:
+   - 7-day rolling bounce rate per domain
+   - Alert if bounce rate > 3% over 7 days
+   - Trigger domain retirement if threshold exceeded
+
+6. Bounce handler resilience:
+   - If bounce server unreachable: soft failure, emails still send
+   - Restore within 4 hours
+   - Manually review MX logs for missed bounces on recovery
+
+7. ARF (Abuse Reporting Format) handling:
+   - Parse ARF feedback loop messages
+   - Extract complained address
+   - Process as spam complaint (Step 16)
+
+FILES TO CREATE
+---------------
+src/bounce/handler.ts           — Main bounce receiver and processor
+src/bounce/classifier.ts        — Bounce type classification
+src/bounce/parser.ts            — Bounce message parsing (go-sisimai wrapper)
+src/bounce/suppressor.ts        — Automatic suppression on bounce
+src/bounce/types.ts             — Bounce types and interfaces
+
+DATABASE TABLES
+---------------
+suppression_list — INSERT with reason=hard_bounce or soft_bounce
+subdomains       — UPDATE bounce_count
+domains          — UPDATE bounce_rate_7d
+send_jobs        — UPDATE status='bounced' for matched jobs
+
+DEPENDENCIES
+------------
+- Plan 14 (counter updates) — bounce processing is downstream of sends
+- go-sisimai library for bounce parsing
+- Bounce handler server with public IP
+- MX record configured on all subdomains
+
+VERIFICATION
+------------
+- Hard bounce (550) → address suppressed instantly, never retried
+- Soft bounce (450) → requeued with 24h delay, max 2 retries
+- After 3 soft bounces → permanent suppression
+- Spam block (521) → address suppressed + IP removed from pool
+- Domain bounce rate calculated correctly over 7-day window
+- Bounce rate > 3% → domain retirement triggered

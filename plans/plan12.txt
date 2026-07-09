@@ -1,0 +1,108 @@
+================================================================================
+PLAN 12 — SMTP SEND
+TSD Step 12: SMTP Send
+================================================================================
+
+OBJECTIVE
+---------
+Dispatch signed emails via SMTP on port 587 with STARTTLS from assigned IPs.
+One recipient per connection. Capture full SMTP response for downstream
+processing.
+
+SOURCE COMPONENTS USED
+----------------------
+- postal/MTA                    — Mail transfer agent, IP pool management
+- Haraka/event-driven SMTP     — Plugin architecture, outbound delivery engine
+- Haraka/outbound/             — Client pool, TLS, queue management
+
+IMPLEMENTATION TASKS
+--------------------
+1. SMTP connection parameters:
+   - Port: 587 (STARTTLS) — preferred over port 25
+   - TLS: Required — reject plain text connections
+   - Connection timeout: 10 seconds
+   - Max concurrent connections per IP: 10
+   - Recipients per session: 1 (one email per SMTP connection, NO batching)
+
+2. Connection flow:
+   - Connect to MX server (resolved from DNS MX record)
+   - EHLO with subdomain hostname
+   - STARTTLS → upgrade to TLS
+   - AUTH LOGIN if required (using subdomain credentials)
+   - MAIL FROM:<sender@subdomain.domain.com>
+   - RCPT TO:<recipient@company.com>
+   - DATA → send email content (headers + body)
+   - Capture full SMTP response code and message
+
+3. IP selection for sending:
+   - From ip_pool where status='active' and blacklisted=false
+   - Priority-weighted random selection (higher priority = more traffic)
+   - IP must have valid PTR record
+   - IP must not be on any major blacklist
+
+4. Retry logic:
+   - Connection failure: 3 attempts with 5-second intervals
+   - 4xx response (soft fail): requeue with exponential backoff
+     - Attempt 1: 5 minutes
+     - Attempt 2: 15 minutes
+     - Attempt 3: 45 minutes
+   - 5xx response (hard fail): suppress address, mark failed
+   - Max 3 total attempts before dead letter
+
+5. Anti-fingerprinting timing:
+   - Variable delay between sends: 2-30 seconds per RDP worker
+   - Send window: 8-12 hours daily (not concentrated)
+   - No synchronized sending across all 10 VDS
+   - Higher volume mid-morning and mid-afternoon
+   - Lower volume early morning and late evening
+   - Weekday vs weekend ratio varies
+
+6. SMTP session logging:
+   - Full session transcript captured
+   - Response code and message stored in send_jobs.smtp_response
+   - Connection timestamp, duration, bytes transferred
+   - Error details for failed connections
+
+7. Connection pooling:
+   - Reuse connections where possible (same IP → same MX)
+   - Pool per IP: max 10 concurrent connections
+   - Connection health check before reuse
+   - Graceful connection closure
+
+8. Rate limiting:
+   - Per-IP: max 10 concurrent connections
+   - Per-IP: max 2,000 emails/day
+   - Per-VDS: distribute across 5 IPs
+   - Global: 100,000 emails/day target (Phase 1)
+
+FILES TO CREATE
+---------------
+src/smtp/sender.ts            — Main SMTP send logic
+src/smtp/connection-pool.ts   — Connection pool management
+src/smtp/ip-selector.ts       — IP pool selection with weighting
+src/smtp/response-handler.ts  — SMTP response capture and classification
+src/smtp/retry-manager.ts     — Exponential backoff retry logic
+src/smtp/session-logger.ts    — SMTP session transcript logging
+src/smtp/types.ts             — SMTP types and interfaces
+
+DATABASE TABLES
+---------------
+send_jobs — UPDATE status, smtp_response, sent_at, failed_at
+ip_pool   — UPDATE emails_today on successful send
+
+DEPENDENCIES
+------------
+- Plan 11 (DKIM signing) — email must be signed before SMTP send
+- Plan 10 (content engine) — email content ready for transmission
+- VDS infrastructure with open port 25/587
+- Commercial IPs with valid PTR records
+- MX record DNS resolution
+
+VERIFICATION
+------------
+- Send test email → connects on port 587 with STARTTLS
+- SMTP response code captured correctly (250, 421, 550 etc.)
+- One recipient per connection (no batching)
+- Retry logic: 4xx triggers requeue, 5xx triggers suppression
+- Anti-fingerprinting: timing randomization verified across sends
+- Connection pool: max 10 concurrent per IP enforced

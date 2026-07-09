@@ -1,0 +1,96 @@
+================================================================================
+PLAN 2 — VALIDATION PIPELINE
+TSD Step 2: Validation Pipeline
+================================================================================
+
+OBJECTIVE
+---------
+Run every imported lead through a 6-stage validation pipeline before it can enter
+the send queue. Invalid, disposable, role-based, and unreachable addresses are
+suppressed before any email is sent.
+
+SOURCE COMPONENTS USED
+----------------------
+- cold-cli/lead validation           — Syntax check, MX lookup, catch-all detection, SMTP RCPT TO
+- disposable-email-providers/        — 169,981 disposable email domain database (JSON array)
+- kazmiali/mailtester (referenced)   — Deep SMTP handshake validation
+
+IMPLEMENTATION TASKS
+--------------------
+1. Stage 1 — Syntax Check:
+   - Regex RFC 5322 format validation
+   - Pass → continue to Stage 2
+   - Fail → mark invalid, skip all remaining stages
+
+2. Stage 2 — Domain DNS (MX Lookup):
+   - Query MX records for domain
+   - Domain must have at least one mail server
+   - Pass → continue to Stage 3
+   - Fail → mark invalid, suppress
+
+3. Stage 3 — Disposable Domain Check:
+   - Load disposable-email-providers.json (169K+ domains) into memory Set
+   - Check if lead email domain is in the disposable set
+   - Pass → continue to Stage 4
+   - Fail → mark disposable, suppress
+
+4. Stage 4 — Role-Based Detection:
+   - Check prefix against known role-based addresses:
+     admin@, info@, support@, noreply@, sales@, webmaster@,
+     postmaster@, hostmaster@, abuse@, noc@, security@
+   - Pass → continue to Stage 5
+   - Fail → mark role_based, suppress
+
+5. Stage 5 — Catch-All Detection:
+   - SMTP probe: connect to MX server, EHLO, MAIL FROM (random valid),
+     RCPT TO (random_address@domain)
+   - Response 250 = domain accepts all addresses = catch-all
+   - Result: mark catch_all — optional use, skip or flag (not suppress)
+
+6. Stage 6 — SMTP Handshake:
+   - EHLO → MAIL FROM (your domain) → RCPT TO (lead email)
+   - Check for 250 response (mailbox exists)
+   - Pass → mark valid, enter queue
+   - Fail → mark invalid, suppress
+
+7. Parallel execution: Stages 1-4 run sequentially (fast), Stages 5-6
+   require network calls and can be batched/parallelized
+
+8. Store result in leads.validation_result:
+   valid | invalid | disposable | role_based | catch_all
+
+9. Set leads.validated = true ONLY when full pipeline passes (Stage 6 success)
+
+FILES TO CREATE
+---------------
+src/validation/pipeline.ts              — Main pipeline orchestrator
+src/validation/stages/syntax.ts         — RFC 5322 regex check
+src/validation/stages/mx.ts             — MX record lookup
+src/validation/stages/disposable.ts     — Disposable domain check
+src/validation/stages/role-based.ts     — Role-based prefix detection
+src/validation/stages/catchall.ts       — Catch-all SMTP probe
+src/validation/stages/smtp-handshake.ts — Full SMTP RCPT TO verification
+src/validation/batch-processor.ts       — Batch processing with concurrency control
+src/validation/types.ts                 — Validation result types
+
+DATABASE TABLES
+---------------
+leads — UPDATE validation_result, validated fields
+        Add indexes on: validation_result, validated, industry
+
+DEPENDENCIES
+------------
+- Plan 1 (lead ingestion) — leads must exist before validation
+- disposable-email-providers.json file loaded at startup
+- SMTP server accessible for Stages 5-6
+- Environment: SMTP_PROBE_FROM_DOMAIN, SMTP_PROBE_TIMEOUT
+
+VERIFICATION
+------------
+- 100 known-valid business emails → all pass 6 stages
+- 10 known-invalid emails (syntax fail) → caught at Stage 1
+- 10 disposable emails (mailinator, guerrillamail) → caught at Stage 3
+- 10 role-based (admin@, info@) → caught at Stage 4
+- 5 catch-all domains → flagged at Stage 5
+- 5 non-existent mailboxes → caught at Stage 6
+- Pipeline processes 1000 leads in under 5 minutes

@@ -1,0 +1,92 @@
+================================================================================
+PLAN 7 — DAILY LIMIT CHECK
+TSD Step 7: Daily Limit Check
+================================================================================
+
+OBJECTIVE
+---------
+Enforce per-subdomain and per-IP daily send limits at dispatch time. Jobs that
+exceed limits are held and requeued for the next day — never discarded.
+
+SOURCE COMPONENTS USED
+----------------------
+- cold-cli/daily limit enforcement    — Sender-capacity-aware scheduling
+- listmonk/send limits per server     — Per-server send limit patterns
+
+IMPLEMENTATION TASKS
+--------------------
+1. Daily limit per subdomain:
+   - Warmup phase: 3 emails/day (starts at 3, increases post-warmup)
+   - Post-warmup: 10 emails/day (full capacity)
+   - Check: emails_sent_today < daily_limit before dispatch
+
+2. Daily limit per IP:
+   - Full Phase 1 capacity: 2,000 emails/day per IP
+   - Check: ip_pool.emails_today < 2000 before dispatch
+
+3. Dispatch check flow:
+   - Read subdomains.emails_sent_today from Redis (fast counter)
+   - If at limit → requeue job for next day (change scheduled date)
+   - If under limit → proceed to dispatch
+   - Atomic increment of counter on successful send
+
+4. Redis counter management:
+   - Key: subdomain:{id}:sent_today (STRING, integer)
+   - Key: ip:{id}:sent_today (STRING, integer)
+   - INCR on each successful send
+   - TTL: auto-expire at midnight UTC
+
+5. Midnight UTC daily reset:
+   - Cron job at 00:00 UTC
+   - Reset all subdomains.emails_sent_today = 0
+   - Reset all ip_pool.emails_today = 0
+   - Reset Redis counters to 0
+
+6. Volume monitoring:
+   - Track total daily volume across all domains
+   - Target: 100,000 emails/day (Phase 1)
+   - Alert if >20% below target
+   - Alert if any single domain exceeds 2,000/day
+
+7. Rate limiting per RDP worker:
+   - Max 50 simultaneous jobs per RDP
+   - Random delay between sends: 2-30 seconds
+   - No synchronized sending across all VDS
+
+8. Job requeue logic:
+   - Jobs at limit → update scheduled_date to tomorrow
+   - Preserve job priority and all payload data
+   - Log requeue event for monitoring
+
+FILES TO CREATE
+---------------
+src/queue/daily-limiter.ts      — Limit check and enforcement
+src/queue/midnight-reset.ts     — Daily counter reset cron job
+src/queue/dispatcher.ts         — Main dispatch orchestrator
+src/queue/counter-store.ts      — Redis counter management
+src/queue/types.ts              — Limit types and interfaces
+
+DATABASE TABLES
+---------------
+subdomains — UPDATE emails_sent_today (increment/reset)
+ip_pool    — UPDATE emails_today (increment/reset)
+send_jobs  — UPDATE scheduled_date for requeued jobs
+
+REDIS
+-----
+Keys: subdomain:{id}:sent_today, ip:{id}:sent_today (STRING counters)
+Key:  jobs:requeued (SET) — tracks requeued job IDs
+
+DEPENDENCIES
+------------
+- Plan 6 (job creation) — jobs exist in queue before limit checks
+- Redis for fast counter reads
+- Cron scheduler for midnight reset
+
+VERIFICATION
+------------
+- Subdomain at 10/10 daily limit → next job requeued for tomorrow
+- IP at 2000/2000 limit → jobs on that IP requeued
+- Midnight reset clears all counters to 0
+- Total daily volume tracked accurately across all domains
+- No job lost during requeue operation

@@ -1,0 +1,112 @@
+================================================================================
+PLAN 19 — HEALTH CHECK
+TSD Step 19: Health Check
+================================================================================
+
+OBJECTIVE
+---------
+Continuously monitor domain health, IP reputation, and infrastructure status.
+Fire alerts when thresholds are breached. Trigger automatic domain retirement
+and IP replacement when necessary.
+
+SOURCE COMPONENTS USED
+----------------------
+- coldoutboundskills/email-deliverability-audit — Domain auth, inbox health, bounce rates
+- coldoutboundskills/deliverability-incident-response — Triage playbooks for incidents
+- Gmail Postmaster Tools API       — Domain reputation, spam rate
+- MXToolbox Business API           — IP blacklist monitoring
+
+IMPLEMENTATION TASKS
+--------------------
+1. Hourly domain health evaluation:
+   - Gmail Postmaster score: pulled daily at 6am UTC
+     - Below 70 for 3 consecutive days → flag domain
+   - Complaint rate per domain (7-day rolling):
+     - Above 0.1% → retire domain immediately
+   - Bounce rate per domain (7-day rolling):
+     - Above 3% → retire domain immediately
+
+2. IP blacklist check (every 6 hours):
+   - MXToolbox API check on all 50 active IPs
+   - Blacklisted IP → removed from pool immediately
+   - Replacement ordered within 24 hours
+   - Reserve pool maintained: minimum 5 clean IPs
+
+3. Alert thresholds and actions (TSD §12.1):
+   - Gmail Postmaster < 70 for 3 days → flag domain, begin retirement
+   - Domain complaint rate > 0.1% over 7 days → retire immediately
+   - Domain bounce rate > 3% over 7 days → retire immediately
+   - IP blacklisted → remove from pool + order replacement
+   - RDP heartbeat missed 3x (3 minutes) → alert + provision replacement
+   - Queue server down → failover to backup + alert
+   - Daily send >20% below target → investigate queue depth
+   - Reserve IP pool < 5 → alert + order fresh IPs
+   - Domain expiry < 30 days → alert + renew
+   - Warmup service disconnected → auto-reconnect + alert if fails
+
+4. External monitoring integrations:
+   - Gmail Postmaster Tools: domain reputation, spam rate, SPF/DKIM success
+   - Yahoo Postmaster: complaint data for Yahoo/AOL recipients
+   - Microsoft SNDS: complaint data for Outlook/Hotmail recipients
+   - MXToolbox Business: blacklist status of all 50 IPs
+   - UptimeRobot: VDS uptime, queue server uptime, bounce handler uptime
+
+5. Domain retirement triggers (TSD §4.3):
+   - Postmaster score < 70 for 3 days → retire
+   - Complaint rate > 0.1% over 7 days → retire
+   - Bounce rate > 3% over 7 days → retire
+   - Retirement is NEVER on fixed schedule — only on performance triggers
+
+6. Alert delivery:
+   - Telegram bot API for instant alerts
+   - Slack webhook as alternative
+   - Alert includes: which metric, which domain/IP, current value, threshold
+   - Critical alerts: immediate (complaint spike, IP blacklisted)
+   - Warning alerts: hourly digest (Postmaster decline, reserve pool low)
+
+7. Incident response playbooks:
+   - Reply rate dropped → pause campaigns, check content
+   - Bounce rate spiked → check list quality, pause domain
+   - Domain blacklisted → replace domain, investigate cause
+   - Inbox blocked in warmup → extend warmup, slow volume
+   - Gmail marking as promotional → check content, reduce volume
+
+8. Health dashboard:
+   - Real-time domain health status
+   - IP blacklist status
+   - RDP worker status
+   - Queue depth and processing rate
+   - Daily send volume vs target
+
+FILES TO CREATE
+---------------
+src/monitoring/health-checker.ts       — Main health evaluation loop
+src/monitoring/alert-dispatcher.ts     — Telegram/Slack alert delivery
+src/monitoring/postmaster-client.ts    — Gmail Postmaster API client
+src/monitoring/mxtoolbox-client.ts     — MXToolbox API client
+src/monitoring/domain-retirement.ts    — Automatic domain retirement
+src/monitoring/ip-replacement.ts       — Automatic IP replacement
+src/monitoring/dashboard.ts            — Health dashboard server
+src/monitoring/types.ts                — Monitoring types
+
+DATABASE TABLES
+---------------
+domains — UPDATE postmaster_score, complaint_rate_7d, bounce_rate_7d, status
+ip_pool — UPDATE blacklisted, last_blacklist_check, status
+
+DEPENDENCIES
+------------
+- Plan 18 (engagement update) — engagement data feeds health metrics
+- Gmail Postmaster Tools API access
+- MXToolbox Business API key
+- Telegram Bot Token and Chat ID
+- UptimeRobot API key
+
+VERIFICATION
+------------
+- Postmaster score < 70 for 3 days → domain flagged automatically
+- Complaint rate > 0.1% → domain retired immediately
+- IP on blacklist → removed from pool within minutes
+- Alert delivered to Telegram within 1 minute of threshold breach
+- Reserve pool alert fires when < 5 clean IPs remaining
+- Dashboard shows real-time status of all domains and IPs

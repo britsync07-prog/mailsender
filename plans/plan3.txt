@@ -1,0 +1,84 @@
+================================================================================
+PLAN 3 — SUPPRESSION CHECK
+TSD Step 3: Suppression Check
+================================================================================
+
+OBJECTIVE
+---------
+Cross-reference every validated lead against the suppression list before queue
+entry. Any lead that has previously bounced, complained, unsubscribed, or been
+manually suppressed must NEVER be queued again.
+
+SOURCE COMPONENTS USED
+----------------------
+- listmonk/blocklisting system        — Blocklist management patterns
+- postal/suppression list             — Suppression list with auto-removal logic
+
+IMPLEMENTATION TASKS
+--------------------
+1. Load suppression_list into Redis set for O(1) lookup performance
+   - Key: suppression:emails (Redis SET)
+   - Each suppressed email stored as lowercase string
+
+2. Check pipeline: for each validated lead:
+   - Query Redis: SISMEMBER suppression:emails lead.email
+   - Match found → mark lead.status = 'suppressed', skip queue
+   - No match → proceed to Step 4 (engagement check)
+
+3. Suppression reasons (from TSD §7.4):
+   - hard_bounce    — SMTP 550/551/553/554 response
+   - soft_bounce    — 3+ consecutive soft bounces
+   - spam_complaint — FBL notification from Gmail/Yahoo/Outlook
+   - unsubscribe    — Lead replied with opt-out keyword or clicked unsubscribe
+   - non_engager    — 2+ emails sent with zero engagement
+   - manual         — Operator manually suppressed
+
+4. API endpoint to add to suppression list:
+   - POST /api/suppression { email, reason, source_subdomain_id }
+   - Auto-add to Redis SET + PostgreSQL suppression_list table
+   - Never modify suppressed_at after creation
+
+5. API endpoint to remove from suppression list (manual override):
+   - DELETE /api/suppression/{email}
+   - Requires operator confirmation
+   - Log removal for audit trail
+
+6. Import existing suppression data:
+   - From listmonk blocklists if migrating
+   - From postal suppression list if migrating
+   - Bulk CSV import endpoint
+
+7. Suppression list sync: Redis SET ↔ PostgreSQL table synced on:
+   - Write-through on every add/remove
+   - Periodic full reconciliation (hourly)
+
+FILES TO CREATE
+---------------
+src/suppression/checker.ts       — Redis-based suppression lookup
+src/suppression/manager.ts       — Add/remove suppression entries
+src/suppression/cache.ts         — Redis SET management and sync
+src/suppression/importer.ts      — Bulk import from CSV/external systems
+src/suppression/types.ts         — Suppression reason types
+
+DATABASE TABLES
+---------------
+suppression_list — INSERT new entries (id, email, reason, suppressed_at, source_subdomain_id)
+leads           — UPDATE status='suppressed' for matched leads
+
+REDIS
+-----
+Key: suppression:emails (SET) — all suppressed emails for O(1) lookup
+
+DEPENDENCIES
+------------
+- Plan 2 (validation pipeline) — validated leads feed into suppression check
+- Redis instance running and accessible
+- PostgreSQL suppression_list table created (TSD §7.4)
+
+VERIFICATION
+------------
+- Import 50 known-suppressed emails → all blocked from queue
+- Add new suppression via API → appears in Redis within 1 second
+- Remove suppression → email no longer blocked
+- 10,000 lead suppression check completes in under 100ms
+- Redis-PostgreSQL sync verified after add/remove operations

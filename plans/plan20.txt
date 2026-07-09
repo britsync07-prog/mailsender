@@ -1,0 +1,122 @@
+================================================================================
+PLAN 20 — DAILY RESET
+TSD Step 20: Daily Reset
+================================================================================
+
+OBJECTIVE
+---------
+Execute midnight UTC daily reset of all counters, generate daily send volume
+reports, and produce weekly engagement reports. Maintain accurate historical
+records for trend analysis and operational decision-making.
+
+SOURCE COMPONENTS USED
+----------------------
+- cold-cli/tick engine          — Stats and logging patterns
+- listmonk/campaign analytics   — Campaign views, clicks, bounces export
+
+IMPLEMENTATION TASKS
+--------------------
+1. Midnight UTC daily reset (cron: 0 0 * * *):
+   - Reset subdomains.emails_sent_today = 0 (all subdomains)
+   - Reset ip_pool.emails_today = 0 (all IPs)
+   - Reset Redis counters: SET subdomain:{id}:sent_today = 0
+   - Archive previous day's counters for historical tracking
+   - Log reset event with timestamp
+
+2. Daily send volume report (generated at 00:05 UTC):
+   - Total emails sent vs target (100,000 Phase 1)
+   - Per-domain breakdown (50 domains)
+   - Per-IP breakdown (50 IPs)
+   - Per-industry breakdown (smart_homes, mortgage, cybersecurity)
+   - Bounce rate summary
+   - Complaint rate summary
+   - Reply rate summary
+   - Suppression list additions
+   - Blacklisted IPs detected
+   - Retired domains
+   - Dead letter queue count
+
+3. Weekly engagement report (Mondays at 9am UTC):
+   - Per-cluster reply rate, open rate, complaint rate
+   - Subdomain performance rankings (top 10, bottom 10)
+   - Content variant performance comparison
+   - Experiment results and winners
+   - Week-over-week trend comparison
+   - Recommendations for next week
+
+4. Additional scheduled jobs:
+   - Dead letter review alert (8am daily):
+     - Alert if dead letter queue non-empty
+     - Requires manual review
+   - Domain expiry check (10am daily):
+     - Alert on any domain expiring within 30 days
+   - Warmup service health (every 15 minutes):
+     - Verify all SMTPs connected to warmup service
+   - RDP heartbeat check (every minute):
+     - Alert if any RDP misses 3 consecutive heartbeats
+   - Reserve pool check (every 4 hours):
+     - Alert if reserve IP pool below 5 clean IPs
+   - Suppression list backup (2am daily):
+     - Encrypted backup of suppression list to secure storage
+
+5. Report storage:
+   - Daily reports stored in: reports/daily/YYYY-MM-DD.md
+   - Weekly reports stored: reports/weekly/YYYY-WXX.md
+   - CSV exports for data analysis
+   - Historical reports retained 12 months minimum
+
+6. Report delivery:
+   - Daily report → Telegram channel at 00:10 UTC
+   - Weekly report → Telegram + email at Monday 9:10am UTC
+   - Critical alerts → immediate Telegram notification
+
+7. Cron job management:
+   - All crons defined in centralized scheduler
+   - Cron expressions validated on startup
+   - Failed cron jobs retried once, then alert
+   - Cron execution logs for audit
+
+8. Historical data management:
+   - Daily counters archived for trend analysis
+   - 90-day detail retention
+   - 12-month aggregate retention
+   - Encrypted backup to secure storage
+
+FILES TO CREATE
+---------------
+src/cron/midnight-reset.ts       — Daily counter reset job
+src/cron/daily-report.ts         — Daily volume report generation
+src/cron/weekly-report.ts        — Weekly engagement report
+src/cron/dead-letter-review.ts   — Dead letter queue alert
+src/cron/domain-expiry-check.ts  — Domain expiry monitoring
+src/cron/scheduler.ts            — Centralized cron job manager
+src/cron/types.ts                — Cron types and interfaces
+
+DATABASE TABLES
+---------------
+subdomains — UPDATE emails_sent_today = 0
+ip_pool    — UPDATE emails_today = 0
+report_logs — NEW TABLE for storing report metadata
+
+REDIS
+-----
+Keys: subdomain:{id}:sent_today, ip:{id}:sent_today → SET to 0
+
+DEPENDENCIES
+------------
+- Plan 18 (engagement data) — feeds into weekly report
+- Plan 19 (health data) — feeds into daily report
+- Cron scheduler (node-cron or system crontab)
+- Telegram Bot API for report delivery
+- Secure storage for encrypted backups
+
+VERIFICATION
+------------
+- Midnight reset clears all daily counters to 0
+- Daily report generated with correct metrics at 00:05 UTC
+- Weekly report generated every Monday at 9am UTC
+- Dead letter alert fires when queue non-empty
+- Domain expiry alert fires 30 days before expiry
+- All cron jobs execute on schedule
+- Historical reports stored and retrievable
+- Report delivery to Telegram confirmed

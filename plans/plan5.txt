@@ -1,0 +1,83 @@
+================================================================================
+PLAN 5 — INDUSTRY SEGMENTATION
+TSD Step 5: Industry Segmentation
+================================================================================
+
+OBJECTIVE
+---------
+Assign each lead to its correct industry cluster (Smart Homes, Mortgage,
+Cybersecurity) and enforce complete isolation between clusters — different
+domains, different IPs, different sending identities. Zero cross-contamination.
+
+SOURCE COMPONENTS USED
+----------------------
+- listmonk/list segmentation       — List management, tags, subscriber grouping
+- coldoutboundskills/icp-onboarding — ICP definition and qualification
+- coldoutboundskills/icp-prompt-builder — AI-based ICP scoring
+
+IMPLEMENTATION TASKS
+--------------------
+1. Define three industry clusters:
+   - smart_homes: 17 domains (Phase 1), homeowners, contractors, installers
+   - mortgage: 17 domains (Phase 1), brokers, loan officers, real estate agents
+   - cybersecurity: 16 domains (Phase 1), IT managers, CISOs, CTOs
+
+2. Lead-to-industry assignment logic:
+   - Primary: industry field from import source
+   - Secondary: job_title keyword matching (e.g., "mortgage broker" → mortgage)
+   - Tertiary: company domain TLD/industry lookup
+   - Manual override via API if needed
+
+3. Domain pool isolation:
+   - Each industry gets its own set of domains
+   - No domain can serve leads from multiple industries
+   - Different IPs assigned per industry cluster
+   - Different sender names per industry
+
+4. ICP qualification per industry:
+   - smart_homes: decision makers with purchase authority, 10+ employees
+   - mortgage: active in home lending, verified business email
+   - cybersecurity: B2B decision makers at 50+ employee companies
+
+5. Industry-tagged lead lists:
+   - Create named lists per industry in the system
+   - Tag leads with industry for fast filtering
+   - Industry-specific pain point mapping
+
+6. Cross-contamination prevention:
+   - Validation at job creation: verify lead.industry matches domain.industry
+   - Alert if mismatch detected
+   - Never allow same email to be queued under different industry domains
+
+7. Industry performance tracking:
+   - Separate metrics per cluster
+   - Weekly comparison reports
+   - Per-industry bounce/complaint thresholds
+
+FILES TO CREATE
+---------------
+src/segmentation/industry-router.ts    — Lead-to-industry assignment
+src/segmentation/domain-pools.ts       — Industry domain pool management
+src/segmentation/icp-scorer.ts         — ICP qualification scoring
+src/segmentation/cross-contamination-guard.ts — Isolation enforcement
+src/segmentation/types.ts              — Industry cluster types
+
+DATABASE TABLES
+---------------
+leads    — UPDATE industry field, add industry-specific tags
+domains  — UPDATE industry field (17 smart_homes, 17 mortgage, 16 cybersecurity)
+NEW TABLE: industry_domain_pools — maps industry → domain set
+
+DEPENDENCIES
+------------
+- Plan 4 (engagement check) — leads pass engagement before segmentation
+- Domain infrastructure (TSD §4) — 50+ domains purchased and provisioned
+- Cloudflare DNS automation — domain management
+
+VERIFICATION
+------------
+- 100 mortgage leads → all assigned to mortgage cluster
+- Mortgage lead assigned to cybersecurity domain → BLOCKED with alert
+- Each industry pool has correct domain count
+- No domain appears in multiple industry pools
+- ICP scoring correctly qualifies/disqualifies leads

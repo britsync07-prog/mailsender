@@ -1,0 +1,106 @@
+================================================================================
+PLAN 9 — RDP PICKUP
+TSD Step 9: RDP Worker Agent
+================================================================================
+
+OBJECTIVE
+---------
+Deploy stateless worker agents on each of the 200 RDP instances that poll the
+Redis queue, perform final pre-send checks, and execute email delivery. All
+state lives in Redis/PostgreSQL — never on the RDP itself.
+
+SOURCE COMPONENTS USED
+----------------------
+- cold-cli/tick engine pattern    — Idempotent tick command, reply/bounce detection
+- Custom per TSD §8.5             — RDP Worker Agent specification
+
+IMPLEMENTATION TASKS
+--------------------
+1. Worker agent startup sequence:
+   - Register RDP in rdp_instances table (machine ID, public IP, provider)
+   - Connect to Redis queue server via encrypted TLS
+   - Begin polling email-send-queue at concurrency of 50 simultaneous jobs
+   - Start heartbeat: alive signal to monitoring server every 60 seconds
+
+2. Per-job processing flow:
+   - Receive job payload from Redis queue (BRPOP)
+   - Final suppression check → if suppressed, mark and skip
+   - Verify daily limit not exceeded → if at limit, requeue
+   - Build email using template_id and content engine
+   - Apply spintax variation and personalization tokens
+   - Sign email with DKIM using subdomain private key
+   - Establish SMTP connection via assigned sending IP
+   - Send email → capture full SMTP response
+   - 2xx: mark sent, increment counters
+   - 4xx: requeue with exponential backoff (5min, 15min, 45min)
+   - 5xx: hard fail, suppress, log
+
+3. Concurrency control:
+   - 50 simultaneous jobs per RDP worker
+   - Atomic job claiming: BRPOP with visibility timeout
+   - Failed jobs return to queue after timeout
+   - No double-processing of same job
+
+4. RDP rotation every 4 days:
+   - Day 4: New RDP provisioned in cloud account
+   - Old RDP enters graceful drain: completes in-progress jobs, accepts no new
+   - Drain window: maximum 10 minutes → old RDP terminated
+   - Zero job loss: all pending jobs remain in Redis
+
+5. Worker registration and discovery:
+   - Each worker registers on startup with unique machine_id
+   - Monitoring server tracks active workers via heartbeat
+   - 3 missed heartbeats → alert + provision replacement
+
+6. Logging:
+   - Structured JSON logging per job
+   - Log to tick.log on RDP
+   - --json flag for machine-readable output
+   - Job result logged to send_jobs table
+
+7. Error handling:
+   - Connection failure: retry 3 times with 5-second intervals
+   - SMTP timeout: 10 second connection timeout
+   - Queue server unreachable: alert, worker pauses, retries
+   - Database unreachable: alert, worker pauses
+
+8. Anti-fingerprinting per worker:
+   - User-Agent strings varied across RDP workers
+   - No fixed worker-to-subdomain mapping
+   - Random delay between sends: 2-30 seconds
+   - Send window distributed across 8-12 hours
+
+FILES TO CREATE
+---------------
+src/worker/agent.ts           — Main worker agent entry point
+src/worker/heartbeat.ts       — Heartbeat sender
+src/worker/rotation.ts        — RDP rotation and graceful drain
+src/worker/processor.ts       — Per-job processing logic
+src/worker/registration.ts    — Worker registration on startup
+src/worker/types.ts           — Worker types and interfaces
+
+DATABASE TABLES
+---------------
+rdp_instances — NEW TABLE: id, machine_id, public_ip, provider, status, last_heartbeat
+send_jobs     — UPDATE status, smtp_response, sent_at, failed_at
+
+REDIS
+-----
+Queue: email-send-queue (LIST) — BRPOP for job pickup
+Key: worker:{id}:heartbeat (STRING) — last heartbeat timestamp
+
+DEPENDENCIES
+------------
+- Plan 6 (job creation) — jobs exist in Redis queue
+- Plan 7 (daily limit) — limit checks at dispatch
+- Plan 8 (warmup gate) — only warmed subdomains used
+- 200 RDP instances provisioned and accessible
+- Redis with TLS, PostgreSQL
+
+VERIFICATION
+------------
+- Worker starts → registers in rdp_instances, begins polling
+- Picks up job → performs all checks → sends email → marks sent
+- Worker at 50 concurrent jobs → new jobs queue until slot opens
+- RDP rotation: old worker drains, new worker takes over, zero job loss
+- Heartbeat miss × 3 → alert fired

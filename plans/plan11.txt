@@ -1,0 +1,96 @@
+================================================================================
+PLAN 11 — DKIM SIGNING
+TSD Step 11: DKIM Signing
+================================================================================
+
+OBJECTIVE
+---------
+Generate DKIM key pairs for every subdomain, store private keys securely
+(AES-256 encrypted), and sign every outbound email with the correct subdomain's
+DKIM key before transmission.
+
+SOURCE COMPONENTS USED
+----------------------
+- dnscontrol/               — DKIM DNS record provisioning via Cloudflare API
+- postal/DKIM key pairs    — Auto-generates RSA key pairs per domain
+- Haraka/DKIM plugin       — DKIM signing plugin architecture
+
+IMPLEMENTATION TASKS
+--------------------
+1. DKIM key pair generation:
+   - Generate 2048-bit RSA key pair per subdomain
+   - Run at provisioning time (when subdomain is created)
+   - Store private key in subdomains.dkim_private_key
+   - Store DKIM selector in subdomains.dkim_selector
+
+2. Private key security:
+   - Encrypt private keys at rest using AES-256
+   - Encryption key stored separately (environment variable)
+   - Decrypt ONLY at signing time (in memory, never written to disk)
+   - Key rotation: generate new key pair annually
+
+3. DKIM signing process:
+   - Fetch subdomain's private key from database (decrypt in memory)
+   - Generate DKIM-Signature header:
+     - v=1
+     - a=rsa-sha256
+     - d={subdomain.domain.com}
+     - s={selector}
+     - h=from:to:subject:date:message-id:list-unsubscribe
+     - bh={body hash}
+     - b={header hash}
+   - Apply signature before SMTP transmission
+
+4. Required email headers (TSD §8.6):
+   - From: sender name + subdomain email (MUST match DKIM domain)
+   - Reply-To: monitored reply mailbox on same root domain
+   - Message-ID: <uuid@subdomain.domain.com> (globally unique)
+   - DKIM-Signature: auto-generated (this step)
+   - List-Unsubscribe: mailto: and https: endpoints
+   - List-Unsubscribe-Post: List-Unsubscribe=One-Click
+   - Precedence: bulk
+   - X-Mailer: REMOVED entirely (never expose sending software)
+
+5. DNS provisioning for DKIM:
+   - Record: {selector}._domainkey.{subdomain} → TXT
+   - Value: v=DKIM1; k=rsa; p={BASE64_PUBLIC_KEY}
+   - Provisioned via Cloudflare API (dnscontrol integration)
+   - Verified via dig query before subdomain activation
+
+6. DKIM verification before send:
+   - Verify DKIM signature is valid before SMTP connection
+   - Log any signing failures
+   - Never send unsigned email
+
+7. Key management:
+   - Database: subdomains table stores encrypted private key + selector
+   - Key generation script: runs for each new subdomain
+   - Backup: encrypted key backup to secure storage
+
+FILES TO CREATE
+---------------
+src/dkim/signer.ts           — DKIM signature generation
+src/dkim/key-generator.ts    — RSA-2048 key pair generation
+src/dkim/header-builder.ts   — Email header construction with DKIM
+src/dkim/key-store.ts        — Encrypted key storage and retrieval
+src/dkim/types.ts            — DKIM types and interfaces
+
+DATABASE TABLES
+---------------
+subdomains — UPDATE dkim_private_key (AES-256 encrypted), dkim_selector
+
+DEPENDENCIES
+------------
+- Plan 2 (DNS provisioning) — DKIM DNS record created per subdomain
+- dnscontrol or Cloudflare API for DNS record creation
+- OpenSSL or Node.js crypto for RSA key generation
+- AES-256 encryption key in environment variables
+
+VERIFICATION
+------------
+- Generate DKIM key pair → private key stored encrypted
+- Sign test email → DKIM-Signature header present and valid
+- dig query on selector._domainkey.subdomain → public key returned
+- Verify signature with public key → valid
+- X-Mailer header completely absent from signed email
+- List-Unsubscribe headers present in both mailto: and https: format

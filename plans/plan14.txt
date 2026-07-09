@@ -1,0 +1,96 @@
+================================================================================
+PLAN 14 — COUNTER UPDATE
+TSD Step 14: Counter Update
+================================================================================
+
+OBJECTIVE
+---------
+Increment all relevant counters after a successful send. Update subdomain,
+IP, lead, and send_jobs records atomically. Maintain accurate daily and
+lifetime counters for monitoring and limit enforcement.
+
+SOURCE COMPONENTS USED
+----------------------
+- listmonk/campaign analytics    — Views, clicks, bounces tracked per campaign
+- cold-cli/event recording       — Structured event logging
+
+IMPLEMENTATION TASKS
+--------------------
+1. Subdomain counter updates (on successful send):
+   - INCREMENT subdomains.emails_sent_today by 1
+   - INCREMENT subdomains.total_sent by 1
+   - Atomic operation: use SQL UPDATE ... SET x = x + 1
+
+2. IP counter updates:
+   - INCREMENT ip_pool.emails_today by 1
+   - Atomic operation: same pattern
+
+3. Lead counter updates:
+   - INCREMENT leads.send_count by 1
+   - SET leads.last_sent_at = NOW()
+   - Update leads.status = 'sent' (if first send)
+
+4. Send job record update:
+   - SET send_jobs.status = 'sent'
+   - SET send_jobs.sent_at = NOW()
+   - Store send_jobs.smtp_response (from Step 13)
+
+5. Redis real-time counters:
+   - Key: subdomain:{id}:sent_today — INCR (atomic)
+   - Key: ip:{id}:sent_today — INCR (atomic)
+   - Key: daily:total — INCR (global daily counter)
+   - Periodic sync: Redis counters → PostgreSQL every 5 minutes
+
+6. Midnight UTC daily reset:
+   - Cron at 00:00 UTC
+   - Reset subdomains.emails_sent_today = 0 (all subdomains)
+   - Reset ip_pool.emails_today = 0 (all IPs)
+   - Reset Redis counters: SET subdomain:{id}:sent_today = 0
+   - Archive daily counters for historical tracking
+
+7. Daily volume tracking:
+   - Total emails sent across all domains
+   - Per-domain breakdown
+   - Per-IP breakdown
+   - Per-industry breakdown
+   - Compare against target (100K Phase 1)
+
+8. Aggregate statistics:
+   - Hourly rollups for monitoring dashboard
+   - Daily rollups for reporting
+   - Weekly rollups for trend analysis
+
+FILES TO CREATE
+---------------
+src/counters/updater.ts          — Counter increment logic
+src/counters/daily-reset.ts      — Midnight UTC reset cron job
+src/counters/aggregator.ts       — Statistical aggregation
+src/counters/redis-sync.ts       — Redis ↔ PostgreSQL sync
+src/counters/types.ts            — Counter types
+
+DATABASE TABLES
+---------------
+subdomains — UPDATE emails_sent_today, total_sent (increment)
+ip_pool    — UPDATE emails_today (increment)
+leads      — UPDATE send_count, last_sent_at, status
+send_jobs  — UPDATE status, sent_at
+
+REDIS
+-----
+Keys: subdomain:{id}:sent_today, ip:{id}:sent_today, daily:total
+
+DEPENDENCIES
+------------
+- Plan 13 (response processing) — only successful sends trigger counter updates
+- Redis for real-time counter reads
+- Cron scheduler for midnight reset
+- PostgreSQL for persistent storage
+
+VERIFICATION
+------------
+- Send 10 emails → subdomains.emails_sent_today = 10
+- Send 10 emails → ip_pool.emails_today = 10
+- Lead send_count incremented correctly
+- Midnight reset clears all daily counters to 0
+- Redis and PostgreSQL counters stay in sync
+- Daily volume report shows correct totals per domain/IP/industry

@@ -1,0 +1,111 @@
+================================================================================
+PLAN 13 — RESPONSE PROCESSING
+TSD Step 13: Response Processing
+================================================================================
+
+OBJECTIVE
+---------
+Classify every SMTP response from the send operation. Route to success,
+retry, or failure paths based on response codes. Ensure no email is lost
+and no address receives duplicate sends.
+
+SOURCE COMPONENTS USED
+----------------------
+- postal/delivery logs         — Message tracking and delivery status
+- cold-cli/event recording     — Event-based send/reply/bounce tracking
+
+IMPLEMENTATION TASKS
+--------------------
+1. Response classification:
+   - 2xx SUCCESS:
+     - 250: OK, message accepted
+     - 251: User not local, will forward
+     - 252: Cannot VRFY user, will accept
+     → Mark send_jobs.status = 'sent'
+     → Record sent_at timestamp
+     → Proceed to Counter Update (Step 14)
+
+   - 4xx SOFT FAIL (retry):
+     - 421: Service not available
+     - 450: Mailbox unavailable
+     - 451: Temporary error
+     - 452: Insufficient storage
+     → Requeue with exponential backoff
+     → Increment attempt_count
+     → Max 3 attempts before dead letter
+
+   - 5xx HARD FAIL (suppress):
+     - 550: Mailbox unavailable / not found
+     - 551: User not local
+     - 553: Mailbox name not allowed
+     - 554: Transaction failed
+     → Add lead to suppression_list
+     → Mark send_jobs.status = 'failed'
+     → Record failed_at timestamp
+
+2. Attempt tracking:
+   - attempt_count starts at 1, incremented on each retry
+   - Max 3 attempts → move to dead letter queue
+   - Dead letter queue: email-dead-letter
+   - Job TTL: 72 hours → expired jobs moved to dead letter
+
+3. Dead letter processing:
+   - Jobs in dead letter require manual review
+   - Daily alert if dead letter queue is non-empty
+   - Review: determine if retry is worthwhile or permanently failed
+   - Log dead letter events for audit
+
+4. Response code parsing:
+   - Extract numeric code (250, 421, 550 etc.)
+   - Extract full message text
+   - Parse enhanced status codes (5.7.1 etc.)
+   - Store both code and full message in send_jobs
+
+5. Duplicate prevention:
+   - Check send_jobs before processing: has this lead already been sent from this subdomain?
+   - Prevent same lead → same subdomain within 30 days
+   - Prevent same lead → same domain within 14 days
+   - Atomic job processing: BRPOP with visibility timeout
+
+6. Response logging:
+   - Full SMTP session transcript stored
+   - Response code, message, timestamp
+   - Subdomain and IP used
+   - Connection duration
+
+7. Integration with bounce handler:
+   - Some bounces arrive asynchronously (after initial 2xx)
+   - Bounce handler (Step 15) processes these separately
+   - Cross-reference: if address bounces after initial send, suppress
+
+FILES TO CREATE
+---------------
+src/response/classifier.ts      — Response code classification
+src/response/retry-manager.ts   — Exponential backoff and retry logic
+src/response/dead-letter.ts     — Dead letter queue management
+src/response/code-parser.ts     — SMTP response code parsing
+src/response/types.ts           — Response types and interfaces
+
+DATABASE TABLES
+---------------
+send_jobs — UPDATE status, attempt_count, smtp_response, sent_at, failed_at
+dead_letter — NEW TABLE or Redis SET for permanently failed jobs
+
+REDIS
+-----
+Queue: email-dead-letter (LIST) — permanently failed jobs
+
+DEPENDENCIES
+------------
+- Plan 12 (SMTP send) — response codes from send operation
+- Plan 3 (suppression) — hard failures add to suppression list
+- Redis for dead letter queue
+
+VERIFICATION
+------------
+- 250 response → job marked sent, counters incremented
+- 450 response → job requeued with backoff delay
+- 550 response → lead suppressed, job marked failed
+- Attempt count correctly tracks retries (1→2→3→dead letter)
+- Dead letter queue receives jobs after 3 failed attempts
+- No duplicate sends to same lead from same subdomain

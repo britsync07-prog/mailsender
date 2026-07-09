@@ -1,0 +1,103 @@
+================================================================================
+PLAN 17 — REPLY PROCESSING
+TSD Step 17: Reply Processing
+================================================================================
+
+OBJECTIVE
+---------
+Monitor Reply-To addresses on all subdomains, capture every reply, classify
+it (positive/neutral/negative), and route accordingly. Positive replies go
+to sales CRM immediately. Negative replies trigger suppression.
+
+SOURCE COMPONENTS USED
+----------------------
+- cold-cli/reply detection     — In-Reply-To header matching, thread-ID fallback
+- listmonk/subscriber status  — Status management on reply
+
+IMPLEMENTATION TASKS
+--------------------
+1. Reply monitoring infrastructure:
+   - Monitor Reply-To address on all subdomains
+   - IMAP connection to each reply mailbox
+   - Poll interval: every 5 minutes
+   - Capture every reply — log against lead and subdomain
+
+2. Reply detection (from cold-cli patterns):
+   - Primary: In-Reply-To header matching against sent message-id
+   - Fallback: thread-ID / conversation tracking
+   - Stop-on-reply: configurable per campaign
+   - Auto-blacklist on unsubscribe keywords
+
+3. Reply classification (AI/LLM-powered):
+   - Positive (interested): wants to talk, asks for demo, shows interest
+   - Neutral (question): needs more info, asks clarifying question
+   - Negative (not interested): not now, not fit, remove me
+   - Unsubscribe: explicit opt-out request
+   - OOO: out of office auto-reply
+   - Bounce: delivery failure (should be caught by Step 15)
+
+4. Positive reply handling:
+   - Lead status = 'replied'
+   - Set leads.replied_at = NOW()
+   - Remove lead from cold email queue (never send again)
+   - Forward to sales CRM immediately
+   - Log positive reply for reporting
+
+5. Negative reply handling:
+   - Treat same as unsubscribe
+   - Add to suppression_list within 1 hour
+   - Reason: 'unsubscribe'
+   - Lead status = 'suppressed'
+
+6. Neutral reply handling:
+   - Log reply for review
+   - Do not suppress (potential future positive)
+   - Flag for human follow-up
+   - Do not send additional cold emails until response
+
+7. Subdomain reply counter:
+   - Increment subdomains.reply_count on every reply
+   - Factor into engagement score calculation (Step 18)
+   - High-reply subdomains (>5%) get priority in dispatch
+
+8. Reply logging:
+   - Full reply content stored
+   - Classification result and confidence
+   - Timestamp and source subdomain
+   - Original email reference (message-id)
+
+9. CRM integration:
+   - Forward positive replies to sales CRM
+   - Include: lead details, reply content, original email
+   - API integration or webhook
+   - Ensure no duplicate CRM entries
+
+FILES TO CREATE
+---------------
+src/reply/processor.ts          — Main reply processing orchestrator
+src/reply/classifier.ts         — AI-powered reply classification
+src/reply/crm-forwarder.ts      — CRM integration for positive replies
+src/reply/imap-monitor.ts       — IMAP polling for incoming replies
+src/reply/types.ts              — Reply types and interfaces
+
+DATABASE TABLES
+---------------
+leads        — UPDATE status='replied', replied_at, engagement_score
+subdomains   — UPDATE reply_count
+suppression_list — INSERT with reason='unsubscribe' for negative replies
+
+DEPENDENCIES
+------------
+- Plan 16 (complaint processing) — parallel feedback processing
+- IMAP access to reply mailboxes
+- AI/LLM for reply classification
+- CRM API for positive reply forwarding
+
+VERIFICATION
+------------
+- Positive reply detected → lead status=replied, forwarded to CRM
+- Negative reply detected → address suppressed within 1 hour
+- Reply count incremented on subdomain correctly
+- Reply classification accurate (test with 50 sample replies)
+- No duplicate CRM entries for same reply
+- IMAP polling captures all replies within 5 minutes

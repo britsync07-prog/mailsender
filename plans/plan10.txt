@@ -1,0 +1,98 @@
+================================================================================
+PLAN 10 — CONTENT ENGINE
+TSD Step 10: Content Engine
+================================================================================
+
+OBJECTIVE
+---------
+Generate uniquely human-written email content for each send using spintax,
+personalization, and rotation rules. Ensure zero pattern for Gmail/Outlook ML
+to fingerprint across the infrastructure.
+
+SOURCE COMPONENTS USED
+----------------------
+- spintax-extended/               — Spintax parsing: random selection, nesting, permutations
+- coldoutboundskills/campaign-copywriting — Stepwise copywriter with variants.yaml
+- coldoutboundskills/smartlead-spintax    — Smartlead-compatible spintax syntax
+- coldoutboundskills/spam-word-checker     — Background spam guardrails
+
+IMPLEMENTATION TASKS
+--------------------
+1. Spintax processing (using spintax-extended library):
+   - Parse templates with {option1|option2|option3} syntax
+   - Word-level spintax (not sentence level)
+   - Example: {Hi|Hello|Hey} {first_name} — generates unique greetings
+   - Nested spintax supported
+   - Count variations: countVariations() for campaign capacity planning
+
+2. Content variation rules (TSD §8.3):
+   - Subject lines: 50+ variations per campaign
+   - Email body: 50+ variations per campaign
+   - Opening line: unique per subdomain (different pool per identity)
+   - CTA phrasing: different per variation, never identical across consecutive emails
+   - Sender name: rotates across subdomains
+   - Email format: alternates plain text / HTML
+   - Email length: three tiers — short (50-100), medium (100-200), long (200-300)
+   - Personalization: mandatory — first_name, company, industry always present
+   - Signature: varies — Best, Regards, Thanks, Cheers etc
+   - Link variation: unique tracking URL per subdomain batch
+
+3. Personalization token resolution:
+   - {{first_name}} → lead.first_name
+   - {{company_name}} → lead.company
+   - {{industry}} → lead.industry
+   - {{pain_point}} → lead.pain_point
+   - Unresolved variables stripped at send time (never send {{var}})
+
+4. Spam word checking (background guardrail):
+   - Auto-triggered on every content draft
+   - Ban list: get, bank, credit, access, open, 100% free, act now, limited time
+   - Ban: em dashes, ALL CAPS, multiple exclamation marks
+   - Ban: greeting prefixes before first name
+   - Safe replacement patterns for banned words
+
+5. HTML structure variation:
+   - Different div nesting across sends
+   - Different class names (randomized)
+   - Different spacing and formatting
+   - Plain text and HTML versions alternated
+
+6. Template storage:
+   - Templates stored in database with spintax syntax
+   - 50+ variations per template computed at send time
+   - Template versioning for A/B testing
+
+7. Anti-fingerprinting enforcement:
+   - Zero repeated subject lines across consecutive emails to same industry
+   - Zero repeated opening sentences across any two emails in same batch
+   - Link domains varied — not single tracking domain
+   - No forwarded-message artifacts — fresh email every time
+
+FILES TO CREATE
+---------------
+src/content/engine.ts              — Main content engine orchestrator
+src/content/spintax-processor.ts   — Spintax parsing using spintax-extended
+src/content/personalizer.ts        — Token resolution and personalization
+src/content/format-rotator.ts      — Plain text / HTML alternation
+src/content/spam-guard.ts          — Spam word checking
+src/content/template-manager.ts    — Template CRUD and versioning
+src/content/types.ts               — Content types and interfaces
+
+DATABASE TABLES
+---------------
+templates — NEW TABLE: id, name, industry, subject_spintax, body_spintax, format, length_tier
+subdomains — UPDATE sender_name, opening_line_pool
+
+DEPENDENCIES
+------------
+- Plan 6 (job creation) — template_id referenced in job payload
+- spintax-extended npm package installed
+- coldoutboundskills/spam-word-checker rules loaded
+
+VERIFICATION
+------------
+- Same template → 100 renders → all unique (no two identical)
+- Personalization tokens all resolved (no {{var}} in output)
+- Spam words detected and flagged before send
+- HTML and plain text versions both render correctly
+- Content variation count matches campaign requirements (50+)

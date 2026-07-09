@@ -1,0 +1,73 @@
+================================================================================
+PLAN 1 — LEAD INGESTION
+TSD Step 1: Lead Ingestion
+================================================================================
+
+OBJECTIVE
+---------
+Import purchased lead lists into the PostgreSQL leads table with proper validation,
+deduplication, and industry assignment. Every lead enters with status=pending and
+validated=false. The source field is mandatory on every record.
+
+SOURCE COMPONENTS USED
+----------------------
+- coldoutboundskills/prospeo-full-export   — Prospeo people search API integration
+- coldoutboundskills/blitz-list-builder    — Blitz domain-first contact discovery
+- coldoutboundskills/google-maps-list-builder — Google Maps local business scraping
+- coldoutboundskills/disco-like            — DiscoLike lookalike company discovery
+- coldoutboundskills/competitor-engagers   — LinkedIn competitor engagement scraping
+
+IMPLEMENTATION TASKS
+--------------------
+1. Build CSV/JSON lead import API endpoint (POST /api/leads/import)
+2. Parse and validate incoming lead data fields:
+   - email (required, lowercase, unique)
+   - first_name (optional)
+   - last_name (optional)
+   - company (optional but critical for cold email)
+   - job_title (optional, used for decision maker verification)
+   - industry (required: smart_homes | mortgage | cybersecurity)
+   - pain_point (optional, for content targeting)
+   - source (required — which data provider, enforced NOT NULL)
+3. Deduplication check against existing leads table (by email)
+4. Set initial state: status=pending, validated=false, send_count=0
+5. Industry assignment based on: industry field + job_title + company domain
+6. Import batch metadata logging (source provider, count, timestamp)
+7. Write source-specific import adapters:
+   - Prospeo: POST https://api.prospeo.io/search-person, 25/page, 1000 pages max
+   - Blitz: batch domain enrichment at 30 req/sec
+   - Google Maps: RapidAPI Maps Data with zip code iteration
+   - DiscoLike: seed domain or text search, $0.10/call
+   - Competitor Engagers: LinkedIn post commenters/reactors
+
+FILES TO CREATE
+---------------
+src/ingestion/importer.ts          — Main import orchestrator
+src/ingestion/sources/prospeo.ts   — Prospeo API adapter
+src/ingestion/sources/blitz.ts     — Blitz API adapter
+src/ingestion/sources/gmaps.ts     — Google Maps API adapter
+src/ingestion/sources/disco.ts     — DiscoLike API adapter
+src/ingestion/sources/competitor.ts — LinkedIn competitor adapter
+src/ingestion/validators.ts        — Field validation rules
+src/ingestion/deduplicator.ts      — Email deduplication logic
+src/ingestion/types.ts             — Lead interface/types
+
+DATABASE TABLES
+---------------
+leads — INSERT with fields: id (UUID), email, first_name, last_name, company,
+        job_title, industry, pain_point, source, validated=false, status='pending',
+        send_count=0, engagement_score=0, created_at
+
+DEPENDENCIES
+------------
+- PostgreSQL database running (schema from TSD Section 7.3)
+- API keys for Prospeo, Blitz, Google Maps, DiscoLike, RapidAPI
+- Environment variables: PROSPEO_API_KEY, BLITZ_API_KEY, RAPIDAPI_KEY, DISCOLIKE_API_KEY
+
+VERIFICATION
+------------
+- Import a test CSV of 100 leads → all appear in leads table with correct fields
+- Duplicate email import → rejected, no duplicates created
+- Missing source field → import rejected with clear error
+- Each industry correctly assigned
+- All leads have status=pending, validated=false

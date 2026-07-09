@@ -1,0 +1,109 @@
+================================================================================
+PLAN 6 — JOB CREATION
+TSD Step 6: Job Creation
+================================================================================
+
+OBJECTIVE
+---------
+Convert validated, segmented leads into send jobs loaded into the Redis
+email-send-queue. Each job payload includes pre-assigned subdomain, IP,
+sender name, and template ID — determined at creation time, not dispatch.
+
+SOURCE COMPONENTS USED
+----------------------
+- cold-cli/campaign management     — Eager scheduling, sender-capacity-aware job creation
+- listmonk/campaign lifecycle      — Campaign draft/scheduled/running state machine
+
+IMPLEMENTATION TASKS
+--------------------
+1. Job payload structure (matching TSD §8.4):
+   {
+     "job_id":        "uuid",
+     "lead_id":       "uuid",
+     "email":         "recipient@company.com",
+     "first_name":    "John",
+     "company":       "Acme Corp",
+     "industry":      "mortgage",
+     "pain_point":    "high customer acquisition cost",
+     "subdomain_id":  "uuid",
+     "subdomain":     "s4j2.domain.com",
+     "ip_id":         "uuid",
+     "sending_ip":    "1.2.3.4",
+     "template_id":   "mortgage-short-v3",
+     "sender_name":   "Michael Chen",
+     "attempt":       1,
+     "queued_at":     "2025-01-01T00:00:00Z"
+   }
+
+2. Subdomain assignment:
+   - Round-robin across active subdomains in the lead's industry pool
+   - Only assign subdomains with warmup_complete=true
+   - Only assign subdomains with emails_sent_today < daily_limit
+   - Track assignment in subdomains table
+
+3. IP assignment:
+   - From ip_pool where status='active' and blacklisted=false
+   - IP must be on the same VDS as the assigned subdomain's sending infrastructure
+   - Priority-weighted selection (higher priority IPs get more traffic)
+
+4. Sender name assignment:
+   - Each subdomain has a pre-assigned human sender name (first + last)
+   - Different name per subdomain to prevent fingerprinting
+   - Stored in subdomains table or content variation config
+
+5. Template assignment:
+   - Based on industry + email length tier (short/medium/long)
+   - Template includes subject line, body, CTA — all with spintax
+   - 50+ variations per campaign for anti-fingerprinting
+
+6. Eager scheduling:
+   - Pre-compute all send times at job creation
+   - Timezone-aware: campaign timezone + per-lead timezone override
+   - Send window: configurable start/end hours (default 9am-5pm)
+   - Send days: configurable (default Mon-Fri)
+   - Random delay between sends: 90-140 seconds
+
+7. Load jobs into Redis queue:
+   - Queue name: email-send-queue
+   - Each job gets unique job_id (UUID)
+   - Job priority based on engagement score
+
+8. Anti-fingerprinting at creation:
+   - No two jobs on same domain send to same recipient within 30 days
+   - No two domains on same VDS send to same recipient within 14 days
+   - Sender name rotation enforced
+
+FILES TO CREATE
+---------------
+src/queue/job-creator.ts        — Main job creation orchestrator
+src/queue/payload-builder.ts    — Build job payload with all fields
+src/queue/scheduler.ts          — Eager scheduling with timezone awareness
+src/queue/subdomain-assigner.ts — Round-robin subdomain assignment
+src/queue/ip-assigner.ts        — IP pool selection
+src/queue/types.ts              — Job payload types
+
+DATABASE TABLES
+---------------
+send_jobs   — INSERT new jobs with full payload
+subdomains  — UPDATE assignment tracking
+ip_pool     — READ for IP selection
+leads       — UPDATE status='queued'
+
+REDIS
+-----
+Key: email-send-queue (LIST) — jobs pushed via LPUSH
+
+DEPENDENCIES
+------------
+- Plan 5 (industry segmentation) — leads must be segmented before job creation
+- Plan 7 (daily limit) — referenced for limit checks at dispatch time
+- Plan 8 (warmup gate) — only warmed subdomains assigned
+- Redis instance, PostgreSQL
+
+VERIFICATION
+------------
+- Create 100 jobs from validated leads → all appear in Redis queue
+- Each job has correct subdomain, IP, sender name, template
+- No two jobs on same domain → same recipient within 30 days
+- Timezone-aware scheduling correct for leads in different timezones
+- Job payload matches TSD §8.4 structure exactly

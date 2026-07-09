@@ -1,0 +1,93 @@
+================================================================================
+PLAN 8 — WARMUP GATE
+TSD Step 8: Warmup Gate
+================================================================================
+
+OBJECTIVE
+---------
+Ensure no subdomain sends cold email until it has completed the full 4-week
+warmup cycle and meets all health criteria. The warmup gate is non-negotiable.
+
+SOURCE COMPONENTS USED
+----------------------
+- coldoutboundskills/smartlead-inbox-manager  — Warmup enable/disable, ramp settings
+- coldoutboundskills/email-deliverability-audit — Domain health verification
+
+IMPLEMENTATION TASKS
+--------------------
+1. Warmup gate criteria (ALL must be true):
+   - warmup_complete = true in database
+   - Gmail Postmaster score for root domain > 70
+   - Zero complaints received during warmup
+   - Bounce rate during warmup < 1%
+
+2. 4-week warmup schedule (from TSD §10):
+   - Week 1-2: 2 emails/SMTP/day via warmup service
+     → 200 SMTPs × 2 = 400 emails/domain/day
+   - Week 3-4: 5 emails/SMTP/day via warmup service
+     → 200 SMTPs × 5 = 1,000 emails/domain/day
+   - Post-warmup: cold email begins at 5/SMTP, scales to 10/SMTP
+
+3. Warmup service integration:
+   - Service: Warmbox or Mailreach (minimum 35K real accounts in network)
+   - Connect all SMTPs via API integration
+   - WHY third-party only: internal SMTP-to-SMTP loops detectable by Gmail ML
+   - Never use internal loops for warmup
+
+4. Activation sequence:
+   - Week 1-2: warmup service only, zero cold email
+   - Week 3-4: warmup service only, monitor Postmaster scores
+   - Month 2 Week 1: cold email begins at 5/SMTP, warmup continues
+   - Month 2 Week 2: scale to 7/SMTP if health metrics confirm
+   - Month 2 Week 3: full Phase 1 capacity at 10/SMTP
+
+5. Warmup monitoring:
+   - Gmail Postmaster score checked weekly during warmup
+   - If score < 60 during warmup → extend warmup period
+   - If score < 70 at activation → delay cold email start
+   - Warmup continues permanently in background after cold email begins
+
+6. Subdomain status transitions:
+   - provisioning → warming (DNS complete, warmup starts)
+   - warming → active (warmup_complete=true, all criteria met)
+   - warming → warming (criteria not met, extend warmup)
+   - active → paused (engagement drops below threshold)
+
+7. Dispatcher integration:
+   - Before dispatch: verify warmup_complete=true
+   - If false → subdomain not used, job reassigned to warmed subdomain
+   - Log warmup gate check for every dispatch decision
+
+8. Warmup service health monitoring:
+   - API health check every 15 minutes
+   - Auto-reconnect if SMTP disconnected
+   - Alert if reconnection fails
+
+FILES TO CREATE
+---------------
+src/warmup/gate.ts              — Warmup gate check before dispatch
+src/warmup/service-client.ts    — Warmbox/Mailreach API integration
+src/warmup/scheduler.ts         — Warmup schedule management
+src/warmup/monitor.ts           — Postmaster score monitoring
+src/warmup/activator.ts         — Subdomain activation logic
+src/warmup/types.ts             — Warmup state types
+
+DATABASE TABLES
+---------------
+subdomains — UPDATE warmup_complete, status, daily_limit
+domains    — UPDATE postmaster_score, warmup_started_at
+
+DEPENDENCIES
+------------
+- Plan 7 (daily limit) — limits apply after warmup activation
+- Warmbox or Mailreach API key
+- Gmail Postmaster Tools API access
+- Domain DNS fully provisioned (all 4 records verified)
+
+VERIFICATION
+------------
+- New subdomain → status=warming, daily_limit=3
+- After 4 weeks with passing scores → warmup_complete=true, status=active
+- Subdomain with Postmaster < 70 → warmup extended, NOT activated
+- Dispatcher never assigns job to subdomain with warmup_complete=false
+- Warmup service reports all SMTPs connected

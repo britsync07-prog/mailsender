@@ -1,0 +1,80 @@
+================================================================================
+PLAN 4 — ENGAGEMENT SCORE CHECK
+TSD Step 4: Engagement Score Check
+================================================================================
+
+OBJECTIVE
+---------
+Evaluate each lead's engagement history before queuing. Leads that have been
+sent 2+ emails with zero engagement (no opens, no replies) are automatically
+suppressed as non-engagers to protect domain reputation.
+
+SOURCE COMPONENTS USED
+----------------------
+- coldoutboundskills/positive-reply-scoring  — Reply classification and scoring
+- coldoutboundskills/engagement patterns     — Engagement tracking and scoring
+
+IMPLEMENTATION TASKS
+--------------------
+1. Non-engager detection:
+   - Query: leads WHERE send_count >= 2 AND replied_at IS NULL
+     AND open_count = 0 AND engagement_score = 0
+   - Auto-suppress: add to suppression_list with reason='non_engager'
+   - Update lead status to 'suppressed'
+
+2. Engagement score calculation per lead:
+   - Formula: (reply_rate × 10) + (open_rate × 2)
+   - reply_rate = replies_received / emails_sent
+   - open_rate = opens_tracked / emails_sent
+   - Score range: 0-100, updated daily
+
+3. Per-lead engagement tracking:
+   - Track opens via 1×1 pixel tracking image
+   - Track replies via Reply-To monitoring
+   - Track clicks via unique tracking URLs per subdomain
+   - Record timestamps for each engagement event
+
+4. Weekly non-engager sweep job:
+   - Cron: every Sunday at midnight UTC
+   - Find all leads with send_count >= 2, zero engagement, not yet suppressed
+   - Batch suppress with reason='non_engager'
+   - Log sweep results (count suppressed, total processed)
+
+5. Engagement-based lead prioritization:
+   - High engagement leads (score > 50): priority for follow-up sequences
+   - Medium engagement (score 20-50): standard follow-up
+   - Low engagement (score < 20): reduce send frequency
+
+6. Engagement score persistence:
+   - Store in leads.engagement_score
+   - Historical tracking for trend analysis
+   - Factor into subdomain engagement score (Step 18)
+
+FILES TO CREATE
+---------------
+src/engagement/checker.ts           — Non-engager detection and suppression
+src/engagement/scorer.ts            — Engagement score calculation
+src/engagement/non-engager-sweep.ts — Weekly sweep cron job
+src/engagement/tracker.ts           — Open/reply/click tracking
+src/engagement/types.ts             — Engagement types and interfaces
+
+DATABASE TABLES
+---------------
+leads           — UPDATE engagement_score, status for non-engagers
+suppression_list — INSERT entries with reason='non_engager'
+engagement_events — NEW TABLE for tracking individual engagement events
+
+DEPENDENCIES
+------------
+- Plan 3 (suppression check) — non-engagers join suppression list
+- Open tracking pixel infrastructure (1×1 image server)
+- Reply-To monitoring infrastructure (Step 17)
+- Redis for caching engagement scores
+
+VERIFICATION
+------------
+- Lead with 3 emails sent, 0 opens, 0 replies → auto-suppressed
+- Lead with 2 emails, 1 open → NOT suppressed (engagement detected)
+- Lead with 1 email sent → NOT checked (needs >= 2 sends)
+- Weekly sweep correctly identifies and suppresses non-engagers
+- Engagement score calculated correctly per formula

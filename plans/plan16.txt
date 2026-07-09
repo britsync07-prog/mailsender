@@ -1,0 +1,97 @@
+================================================================================
+PLAN 16 — COMPLAINT PROCESSING
+TSD Step 16: Complaint Processing
+================================================================================
+
+OBJECTIVE
+---------
+Receive feedback loop (FBL) notifications from Gmail, Yahoo, and Outlook.
+Immediately suppress complained addresses and track complaint rates per domain
+to trigger retirement when thresholds are breached.
+
+SOURCE COMPONENTS USED
+----------------------
+- go-sisimai/ARF handling       — Abuse Reporting Format parsing
+- postal/webhook/event system   — Event-driven notification handling
+
+IMPLEMENTATION TASKS
+--------------------
+1. Feedback loop registration:
+   - Register with Gmail Postmaster Tools (FBL)
+   - Register with Yahoo/AOL postmaster
+   - Register with Microsoft SNDS (Junk Mail Reporting)
+   - Each provides complaint notifications via ARF format
+
+2. ARF message parsing:
+   - Parse ARF (RFC 5972) notification format
+   - Extract: complained address, source IP, source domain, timestamp
+   - Extract: original message headers for matching
+   - Match to original send_job (by message-id or recipient)
+
+3. Complaint processing pipeline:
+   - Receive ARF notification
+   - Parse to extract complained address
+   - Match to lead and source subdomain
+   - Suppress address within 1 hour (target: immediately)
+   - Add to suppression_list with reason = 'spam_complaint'
+   - Increment subdomains.complaint_count
+   - Update domains.complaint_rate_7d
+
+4. Domain complaint rate tracking:
+   - 7-day rolling complaint rate per domain
+   - Formula: complaints_in_7d / emails_sent_in_7d
+   - Alert if complaint rate > 0.1% over 7 days
+   - Trigger IMMEDIATE domain retirement if threshold exceeded
+
+5. Complaint response actions:
+   - Complained address → permanent suppression (never retry)
+   - If single complaint: flag subdomain, continue sending
+   - If 3+ complaints from same subdomain: pause subdomain
+   - If complaint rate > 0.1%: retire entire domain immediately
+
+6. Complaint logging:
+   - Full complaint record: address, domain, subdomain, timestamp
+   - Original message reference for audit
+   - Complaint source (Gmail/Yahoo/Outlook)
+   - Resolution action taken
+
+7. Postmaster data integration:
+   - Gmail Postmaster: daily pull at 6am UTC
+   - Yahoo Postmaster: daily pull at 6:30am UTC
+   - Microsoft SNDS: daily pull at 7am UTC
+   - Cross-reference with FBL complaints
+
+8. Complaint rate by industry:
+   - Track complaint rates per industry cluster
+   - Industry-specific thresholds if needed
+   - Comparative analysis across industries
+
+FILES TO CREATE
+---------------
+src/complaint/handler.ts         — Main complaint receiver
+src/complaint/arf-parser.ts      — ARF notification parsing
+src/complaint/domain-evaluator.ts — Complaint rate calculation and retirement
+src/complaint/fbl-registrar.ts   — Feedback loop registration management
+src/complaint/types.ts           — Complaint types and interfaces
+
+DATABASE TABLES
+---------------
+suppression_list — INSERT with reason=spam_complaint
+subdomains       — UPDATE complaint_count
+domains          — UPDATE complaint_rate_7d, status (if retired)
+
+DEPENDENCIES
+------------
+- Plan 15 (bounce processing) — complaint processing is parallel to bounce handling
+- go-sisimai ARF module for parsing
+- FBL registration with Gmail, Yahoo, Outlook
+- Gmail Postmaster Tools API
+
+VERIFICATION
+------------
+- ARF notification received → address suppressed within 1 hour
+- Complaint rate calculated correctly over 7-day window
+- Complaint rate > 0.1% → domain retired immediately
+- Complaint logged with full audit trail
+- Postmaster data pulled daily at correct times
+- Cross-reference: FBL complaints match Postmaster data

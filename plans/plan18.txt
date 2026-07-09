@@ -1,0 +1,103 @@
+================================================================================
+PLAN 18 — ENGAGEMENT UPDATE
+TSD Step 18: Engagement Update
+================================================================================
+
+OBJECTIVE
+---------
+Recalculate subdomain engagement scores daily. Prioritize high-performing
+subdomains in job dispatch. Flag and pause low-performing subdomains for
+content review.
+
+SOURCE COMPONENTS USED
+----------------------
+- coldoutboundskills/positive-reply-scoring  — Reply rate calculation
+- coldoutboundskills/email-deliverability-audit — Performance benchmarks
+- coldoutboundskills/experiment-design       — A/B test tracking
+
+IMPLEMENTATION TASKS
+--------------------
+1. Engagement score formula per subdomain:
+   - score = (reply_rate × 10) + (open_rate × 2)
+   - reply_rate = replies_received / emails_sent (last 14 days)
+   - open_rate = opens_tracked / emails_sent (last 14 days)
+   - Score range: 0-100
+   - Updated daily at 8am UTC
+
+2. Priority assignment:
+   - High engagement: reply rate > 5% → priority in job queue dispatch
+   - These subdomains get jobs assigned first
+   - They receive more volume allocation
+
+3. Low engagement action:
+   - Reply rate < 1% for 14 consecutive days → pause subdomain
+   - Set subdomains.status = 'paused'
+   - Trigger content review workflow
+   - Do not resume until root cause identified
+
+4. Subdomain pause/resume:
+   - Pause: status = 'paused', no new jobs assigned
+   - Review: check content, list quality, sending patterns
+   - Resume: status = 'active' after review and fixes
+   - Log all pause/resume events
+
+5. Weekly engagement report (Mondays at 9am UTC):
+   - Per-industry cluster report
+   - Metrics: reply rate, open rate, complaint rate, suppression additions
+   - Subdomain performance rankings
+   - Content variant performance comparison
+   - Experiment results (if running A/B tests)
+
+6. Per-industry comparison:
+   - Smart Homes cluster performance
+   - Mortgage cluster performance
+   - Cybersecurity cluster performance
+   - Cross-industry benchmarking
+
+7. Content variant performance:
+   - Track reply rates per template variant
+   - Identify winning variants for scale
+   - Retire underperforming variants
+   - Feed results back to content engine (Step 10)
+
+8. Experiment tracking:
+   - Track A/B test results per campaign
+   - Statistical significance calculation
+   - Winner selection based on reply rate
+   - Document experiment outcomes
+
+9. Engagement trend analysis:
+   - 7-day, 14-day, 30-day rolling averages
+   - Trend direction (improving/declining/stable)
+   - Early warning for declining engagement
+
+FILES TO CREATE
+---------------
+src/engagement/recalculator.ts       — Daily score recalculation
+src/engagement/priority-assigner.ts  — Dispatch priority based on score
+src/engagement/pauser.ts             — Subdomain pause/resume logic
+src/engagement/report-generator.ts   — Weekly report generation
+src/engagement/trend-analyzer.ts     — Trend analysis and early warning
+src/engagement/types.ts              — Engagement types
+
+DATABASE TABLES
+---------------
+subdomains — UPDATE engagement_score, status (paused/active)
+leads      — UPDATE engagement_score
+campaign_analytics — NEW TABLE for variant performance tracking
+
+DEPENDENCIES
+------------
+- Plan 14 (counter updates) — send counts for rate calculation
+- Plan 17 (reply processing) — reply data for engagement scores
+- Open tracking pixel data (1×1 image server)
+- Report generation (markdown + CSV)
+
+VERIFICATION
+------------
+- Engagement score calculated correctly per formula
+- Subdomain with reply rate > 5% → priority in dispatch
+- Subdomain with reply rate < 1% for 14 days → paused
+- Weekly report generated with all required metrics
+- Content variant performance tracked accurately
+- Trend analysis correctly identifies improving/declining subdomains
