@@ -90,8 +90,8 @@ export class CloudflareClient {
     input: CreateDNSRecordInput
   ): Promise<CloudflareDNSRecord> {
     const res = await this.request<CloudflareApiResponse<CloudflareDNSRecord>>(
-      `/zones/${zoneId}/dns_records`,
       'POST',
+      `/zones/${zoneId}/dns_records`,
       input
     );
 
@@ -108,8 +108,8 @@ export class CloudflareClient {
     input: Partial<CreateDNSRecordInput>
   ): Promise<CloudflareDNSRecord> {
     const res = await this.request<CloudflareApiResponse<CloudflareDNSRecord>>(
-      `/zones/${zoneId}/dns_records/${recordId}`,
       'PUT',
+      `/zones/${zoneId}/dns_records/${recordId}`,
       input
     );
 
@@ -122,8 +122,8 @@ export class CloudflareClient {
 
   async deleteDNSRecord(zoneId: string, recordId: string): Promise<void> {
     const res = await this.request<CloudflareApiResponse<null>>(
-      `/zones/${zoneId}/dns_records/${recordId}`,
-      'DELETE'
+      'DELETE',
+      `/zones/${zoneId}/dns_records/${recordId}`
     );
 
     if (!res.success) {

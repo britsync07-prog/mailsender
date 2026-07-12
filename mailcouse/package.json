@@ -10,7 +10,10 @@
     "test": "jest --coverage",
     "test:unit": "jest --testPathPattern=__tests__/(validators|deduplicator|importer)\\.test\\.ts",
     "test:integration": "jest --testPathPattern=__tests__/integration\\.test\\.ts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "seed": "ts-node src/scripts/seed-setup.ts",
+    "dns:provision": "ts-node src/scripts/provision-dns.ts",
+    "setup:vps": "bash src/scripts/vps-setup.sh"
   },
   "keywords": [],
   "author": "",
