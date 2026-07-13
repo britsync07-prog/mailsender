@@ -1,0 +1,61 @@
+<div class="pageHeader">
+  <div class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Webhooks &rarr;</span>
+    History
+  </div>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Manage Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks/history" class="navBar__link is-active">View History</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <% if (!requests || requests.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">No webhook requests recorded.</h2>
+      <p class="noData__text">
+        This page shows the last 10 days worth of webhook requests that have been sent. This page will
+        populate automatically as webhooks are dispatched.
+      </p>
+    </div>
+  <% } else { %>
+    <p class="pageContent__intro u-margin">
+      This page shows a list of all webhook requests which have been sent for this server. These are kept for 10 days before being
+      removed. Click on a request for additional information.
+    </p>
+    <ul class="webhookRequestList">
+      <% requests.forEach(function(req) { %>
+        <li class="webhookRequestList__item">
+          <a href="/portal/webhooks/history/<%= req.uuid || req.id %>" class="webhookRequestList__link">
+            <div class="webhookRequestList__top">
+              <p class="webhookRequestList__status">
+                <span class="label label--http-status-<%= String(req.status_code || req.status)[0] %>"><%= req.status_code || req.status %></span>
+              </p>
+              <p class="webhookRequestList__time"><%= new Date(req.timestamp || req.created_at).toLocaleString() %></p>
+              <p class="webhookRequestList__event"><%= req.event || 'webhook' %></p>
+            </div>
+            <p class="webhookRequestList__url"><%= req.url || req.endpoint_url || 'Unknown' %></p>
+          </a>
+        </li>
+      <% }) %>
+    </ul>
+
+    <% if (pagination && pagination.totalPages > 1) { %>
+      <div class="simplePagination">
+        <p class="simplePagination__previous">
+          <% if (pagination.page > 1) { %><a href="?page=<%= pagination.page - 1 %>" class="simplePagination__link">&larr; Previous</a><% } %>
+        </p>
+        <div class="simplePagination__current">
+          <p class="simplePagination__info"><%= pagination.total %> requests</p>
+          <p>Page <%= pagination.page %> of <%= pagination.totalPages %></p>
+        </div>
+        <p class="simplePagination__next">
+          <% if (pagination.page < pagination.totalPages) { %><a href="?page=<%= pagination.page + 1 %>" class="simplePagination__link">Next &rarr;</a><% } %>
+        </p>
+      </div>
+    <% } %>
+  <% } %>
+</div>

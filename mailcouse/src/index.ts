@@ -221,9 +221,15 @@ app.get('/portal/credentials', async (req, res) => {
 app.get('/portal/messages', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
+  res.redirect('/portal/messages/outgoing');
+});
+
+app.get('/portal/messages/outgoing', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
   try {
     const base = `http://localhost:${config.api.port}`;
-    const qs = new URLSearchParams(req.query as any).toString();
+    const qs = new URLSearchParams({ ...req.query as any, scope: 'outgoing' }).toString();
     const [userRes, dataRes] = await Promise.all([
       fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
       fetch(`${base}/api/portal/messages${qs ? '?' + qs : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
@@ -231,7 +237,74 @@ app.get('/portal/messages', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
-    res.render('messages', { layout: 'application', ...data, title: 'Messages', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+    res.render('messages', { layout: 'application', ...data, title: 'Outgoing Messages', scope: 'outgoing', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/messages/incoming', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const qs = new URLSearchParams({ ...req.query as any, scope: 'incoming' }).toString();
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/messages${qs ? '?' + qs : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
+    res.render('messages', { layout: 'application', ...data, title: 'Incoming Messages', scope: 'incoming', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/messages/held', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const qs = new URLSearchParams({ ...req.query as any, scope: 'held' }).toString();
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/messages${qs ? '?' + qs : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
+    res.render('messages', { layout: 'application', ...data, title: 'Held Messages', scope: 'held', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/messages/queue', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const qs = new URLSearchParams({ ...req.query as any, scope: 'outgoing', status: 'queued' }).toString();
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/messages${qs ? '?' + qs : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
+    res.render('messages', { layout: 'application', ...data, title: 'Message Queue', scope: 'queue', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/messages/suppressions', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/suppressions`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { suppressions: [] };
+    res.render('messages', { layout: 'application', ...data, title: 'Suppressions', scope: 'suppressions', active: 'messages', email: userData.user?.email || '', token, search: '', status: '' });
   } catch { res.redirect('/login'); }
 });
 
@@ -248,7 +321,156 @@ app.get('/portal/messages/:id', async (req, res) => {
     const userData = await userRes.json();
     if (!msgRes.ok) return res.redirect('/portal/messages');
     const data = await msgRes.json();
-    res.render('message-detail', { layout: 'application', msg: data.message, title: 'Message', active: 'messages', email: userData.user?.email || '', token });
+    res.render('message-detail', { layout: 'application', msg: data.message, title: 'Message', active: 'messages', tab: req.query.tab || 'properties', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/webhooks/history', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const qs = new URLSearchParams(req.query as any).toString();
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/webhooks/history${qs ? '?' + qs : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { requests: [], pagination: { page: 1, totalPages: 1 } };
+    res.render('webhook-history', { layout: 'application', ...data, title: 'Webhook History', active: 'webhooks', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/webhooks/history/:uuid', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/webhooks/history/${req.params.uuid}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    if (!dataRes.ok) return res.redirect('/portal/webhooks/history');
+    const data = await dataRes.json();
+    res.render('webhook-request', { layout: 'application', req: data.request, title: 'Webhook Request', active: 'webhooks', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/settings/limits', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/settings`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { server: {} };
+    res.render('settings-limits', { layout: 'application', server: data.server, title: 'Send Limit', active: 'settings', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/settings/retention', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/settings`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { server: {} };
+    res.render('settings-retention', { layout: 'application', server: data.server, title: 'Message Retention', active: 'settings', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/settings/advanced', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/settings`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { server: {} };
+    res.render('settings-advanced', { layout: 'application', server: data.server, title: 'Advanced Settings', active: 'settings', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/help/outgoing', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    res.render('help-outgoing', {
+      layout: 'application', title: 'Help — Sending E-Mail', active: 'help',
+      email: userData.user?.email || '', token,
+      smtpHost: config.api.host, smtpPort: config.platform.smtpPort,
+      credentialName: 'u_' + (userData.user?.id || '').substring(0, 8),
+    });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/help/incoming', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    res.render('help-incoming', { layout: 'application', title: 'Help — Receiving E-Mail', active: 'help', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/send', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, domainRes, routeRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/routes`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
+    const routeData = routeRes.ok ? await routeRes.json() : { routes: [] };
+    const firstDomain = domainData.domains?.find((d: any) => d.verified);
+    res.render('send-message', {
+      layout: 'application',
+      title: 'Send Message',
+      active: 'messages',
+      email: userData.user?.email || '',
+      token,
+      direction: req.query.direction || 'outgoing',
+      message: {
+        from: firstDomain ? `test@${firstDomain.domain}` : '',
+        to: '',
+        subject: `Test Message at ${new Date().toLocaleString()}`,
+        plain_body: 'This is a message to test the delivery of messages through Postal.',
+      },
+      routes: routeData.routes || [],
+      domains: domainData.domains || [],
+    });
   } catch { res.redirect('/login'); }
 });
 

@@ -1,0 +1,68 @@
+<div class="pageHeader">
+  <div class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Help &rarr;</span>
+    Sending E-Mail
+  </div>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/help/outgoing" class="navBar__link is-active">Sending E-Mail</a></li>
+    <li class="navBar__item"><a href="/portal/help/incoming" class="navBar__link">Receiving E-Mail</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <h1 class="pageContent__title">Sending e-mail</h1>
+  <h2 class="pageContent__intro u-margin">
+    There are a couple of different ways you send outgoing mail through a
+    mail server. These methods are shown below:
+  </h2>
+  <p class="u-margin pageContent__helpLink"><a href="/portal/help/incoming">Read more about receiving e-mails</a></p>
+
+  <div class="u-margin">
+    <h2 class="pageContent__subTitle">Important notes</h2>
+    <ul class="pageContent__list">
+      <li>
+        E-mails can only be sent from addresses with domains that you have added to mail server or the server's organization.
+        Mail servers can be enabled to send mail from any domain by the administrator.
+      </li>
+      <li>
+        If a message cannot be delivered, the system will not send you a bounce message but dispatch a webhook (if you set one up).
+        If a message delivery fails but can be retried, the system will try 3 times to deliver it before giving up.
+      </li>
+    </ul>
+  </div>
+
+  <div class="u-margin">
+    <h2 class="pageContent__subTitle">Sending using SMTP</h2>
+    <p class="pageContent__text">These instructions explain how to send messages using the SMTP server.</p>
+
+    <dl class="pageContent__definitions">
+      <dt>SMTP Server Address</dt>
+      <dd>
+        <p class="pageContent__definitionCode"><%= smtpHost %></p>
+      </dd>
+      <dt>Port</dt>
+      <dd>
+        <p class="pageContent__definitionCode"><%= smtpPort %></p>
+        <p class="pageContent__definitionText">The SMTP service supports PLAIN and LOGIN authentication.</p>
+      </dd>
+      <dt>Username</dt>
+      <dd>
+        <p class="pageContent__definitionCode"><%= credentialName %></p>
+      </dd>
+      <dt>Authentication Methods</dt>
+      <dd>
+        <p class="pageContent__definitionCode">PLAIN, LOGIN</p>
+      </dd>
+    </dl>
+  </div>
+
+  <div class="u-margin">
+    <h2 class="pageContent__subTitle">Sending over HTTP using our API</h2>
+    <p class="pageContent__text">
+      For full information about how to use our HTTP API, please <a href="https://docs.postalserver.io/developer/api" class="u-link">see the documentation</a>.
+    </p>
+  </div>
+</div>

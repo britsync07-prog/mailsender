@@ -525,6 +525,7 @@ CREATE TABLE IF NOT EXISTS sent_messages (
     body_text TEXT,
     raw_headers TEXT,
     message_id VARCHAR(255),
+    scope VARCHAR(20) NOT NULL DEFAULT 'outgoing',
     status VARCHAR(50) NOT NULL DEFAULT 'queued',
     bounce TEXT,
     size INTEGER DEFAULT 0,
@@ -534,7 +535,31 @@ CREATE TABLE IF NOT EXISTS sent_messages (
 
 CREATE INDEX IF NOT EXISTS idx_sent_messages_org_id ON sent_messages(organization_id);
 CREATE INDEX IF NOT EXISTS idx_sent_messages_status ON sent_messages(status);
+CREATE INDEX IF NOT EXISTS idx_sent_messages_scope ON sent_messages(scope);
 CREATE INDEX IF NOT EXISTS idx_sent_messages_created_at ON sent_messages(created_at);
+
+-- ============================================================
+-- DELIVERY ATTEMPTS (Postal-like — per-recipient delivery tracking)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS delivery_attempts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    sent_message_id UUID NOT NULL REFERENCES sent_messages(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    rcpt_to VARCHAR(320) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    smtp_code INTEGER,
+    details TEXT,
+    output TEXT,
+    time DECIMAL(10,2),
+    log_id VARCHAR(100),
+    sent_with_ssl BOOLEAN NOT NULL DEFAULT true,
+    timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_sent_message_id ON delivery_attempts(sent_message_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_org_id ON delivery_attempts(organization_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_status ON delivery_attempts(status);
 
 CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -561,6 +586,15 @@ CREATE TABLE IF NOT EXISTS servers (
     dkim_selector VARCHAR(50) DEFAULT 'mailcouse',
     return_path_domain_id UUID REFERENCES customer_domains(id) ON DELETE SET NULL,
     outgoing_domain_id UUID REFERENCES customer_domains(id) ON DELETE SET NULL,
+    send_limit INTEGER,
+    allow_sender BOOLEAN NOT NULL DEFAULT false,
+    privacy_mode BOOLEAN NOT NULL DEFAULT false,
+    log_smtp_data BOOLEAN NOT NULL DEFAULT false,
+    outbound_spam_threshold DECIMAL(5,2),
+    message_retention_days INTEGER,
+    raw_message_retention_days INTEGER,
+    raw_message_retention_size INTEGER,
+    suspended_at TIMESTAMP,
     suspension_reason TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -573,6 +607,7 @@ CREATE INDEX IF NOT EXISTS idx_servers_org_id ON servers(organization_id);
 CREATE TABLE IF NOT EXISTS routes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name VARCHAR(100),
     domain VARCHAR(255),
     match_type VARCHAR(50) NOT NULL DEFAULT 'catch_all',
     match_value VARCHAR(255),
@@ -591,6 +626,7 @@ CREATE INDEX IF NOT EXISTS idx_routes_domain ON routes(domain);
 CREATE TABLE IF NOT EXISTS webhooks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name VARCHAR(100),
     endpoint_url VARCHAR(500) NOT NULL,
     events TEXT[] NOT NULL DEFAULT '{}',
     enabled BOOLEAN NOT NULL DEFAULT true,
@@ -611,11 +647,36 @@ CREATE TABLE IF NOT EXISTS track_domains (
     domain VARCHAR(255) NOT NULL UNIQUE,
     ssl_enabled BOOLEAN NOT NULL DEFAULT true,
     dns_verified BOOLEAN NOT NULL DEFAULT false,
+    dns_status VARCHAR(20),
+    dns_error TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_track_domains_org_id ON track_domains(organization_id);
 CREATE INDEX IF NOT EXISTS idx_track_domains_domain ON track_domains(domain);
+
+-- ============================================================
+-- WEBHOOK REQUESTS (Postal-like — webhook delivery tracking)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS webhook_requests (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    uuid VARCHAR(100) NOT NULL UNIQUE,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    webhook_id UUID REFERENCES webhooks(id) ON DELETE SET NULL,
+    event VARCHAR(100) NOT NULL,
+    url VARCHAR(500) NOT NULL,
+    status_code INTEGER,
+    request_body TEXT,
+    response_body TEXT,
+    time DECIMAL(10,2),
+    log_id VARCHAR(100),
+    timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_requests_org_id ON webhook_requests(organization_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_requests_uuid ON webhook_requests(uuid);
+CREATE INDEX IF NOT EXISTS idx_webhook_requests_timestamp ON webhook_requests(timestamp);
 
 -- ============================================================
 -- SUBDOMAIN POOL TRACKING

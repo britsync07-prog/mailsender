@@ -6,7 +6,7 @@ import * as net from 'net';
 import crypto from 'crypto';
 import { query } from './db/connection';
 import { config } from './config';
-import { getDKIMPrivateKey } from './dkim/key-store';
+import { getDomainDKIMPrivateKey } from './dkim/key-store';
 
 function getLastCode(response: string): { code: number; msg: string; isFinal: boolean } | null {
   const lines = response.trim().split('\r\n');
@@ -111,75 +111,60 @@ export function createSmtpRelay(): SMTPServer {
         const raw = Buffer.concat(chunks);
         const parsed = await simpleParser(raw);
 
-        const envFrom = session.envelope.mailFrom;
-        const mailFrom = parsed.from?.text || (envFrom && typeof envFrom === 'object' ? envFrom.address : 'unknown');
+        const fromAddr = parsed.from?.value?.[0]?.address;
+        if (!fromAddr) return callback(new Error('No From address'));
+        const domainPart = fromAddr.split('@')[1]?.toLowerCase();
+        if (!domainPart) return callback(new Error('Invalid From address'));
+
+        const domResult = await query<{ id: string; domain: string }>(
+          `SELECT id, domain FROM customer_domains
+           WHERE LOWER(domain) = $1 AND organization_id = $2 AND verified = true`,
+          [domainPart, authUser.organizationId]
+        );
+        if (domResult.rows.length === 0) {
+          return callback(new Error(`530 From domain ${domainPart} is not verified for this account`));
+        }
+
+        const customerDomain = domResult.rows[0];
         const subject = parsed.subject || '(no subject)';
         const size = raw.length;
 
-        // Find customer domain from the mail from address
-        const domainPart = mailFrom.split('@')[1];
-        let customerDomainId = authUser.customerDomainId;
-        if (!customerDomainId && domainPart) {
-          const domResult = await query<{ id: string }>(
-            'SELECT id FROM customer_domains WHERE domain = $1 AND organization_id = $2 AND verified = true',
-            [domainPart, authUser.organizationId]
-          );
-          if (domResult.rows.length > 0) customerDomainId = domResult.rows[0].id;
-        }
-
-        // Pick a random available subdomain from the pool
-        const sdResult = await query<{ id: string; subdomain: string; root_domain: string; sender_name: string }>(
-          `SELECT s.id, s.subdomain, d.domain as root_domain, s.sender_name
-           FROM subdomains s JOIN domains d ON s.domain_id = d.id
-           WHERE s.status = 'active' AND s.emails_sent_today < s.daily_limit
-           ORDER BY RANDOM() LIMIT 1`
-        );
-        if (sdResult.rows.length === 0) return callback(new Error('No available sending subdomains'));
-
-        const sub = sdResult.rows[0];
-        const localPart = sub.sender_name.replace(/\s+/g, '.').toLowerCase();
-        const envelopeFrom = `${localPart}@${sub.root_domain}`;
-        const headerFrom = `${sub.sender_name} <${localPart}@${sub.subdomain}>`;
-        const msgId = `<${crypto.randomUUID()}@${sub.subdomain}>`;
-        const toText = parsed.to && typeof parsed.to === 'object' && 'text' in parsed.to ? (parsed.to as any).text : '';
-
-        // Build MIME message
-        const hdrs: Record<string, string> = {
-          'From': headerFrom,
-          'To': toText,
-          'Subject': subject,
-          'Date': new Date().toUTCString(),
-          'Message-ID': msgId,
-        };
-
-        // DKIM sign if available
-        try {
-          const keyData = await getDKIMPrivateKey(sub.id);
-          if (keyData) {
-            const signHdrs = ['from', 'to', 'subject', 'date', 'message-id'];
-            const hdrList = signHdrs.join(':');
-            const hdrStr = signHdrs.map(h => `${h}:${hdrs[h[0].toUpperCase() + h.slice(1)] || ''}`).join('\r\n');
-            const bodyHash = crypto.createHash('sha256').update(parsed.text || parsed.html || '').digest('base64');
-            const sign = crypto.createSign('sha256');
-            sign.update(hdrStr);
-            const b = sign.sign(keyData.privateKey, 'base64');
-            hdrs['DKIM-Signature'] = [
-              'v=1', `a=rsa-sha256`, `d=${sub.root_domain}`, `s=${keyData.selector}`,
-              `h=${hdrList}`, `bh=${bodyHash}`, `b=${b}`,
-            ].join('; ');
-          }
-        } catch {}
-
-        const mimeMessage = Object.entries(hdrs).map(([k, v]) => `${k}: ${v}`).join('\r\n')
-          + '\r\n\r\n' + (parsed.html || parsed.text || '');
-
-        // Deliver to all recipients
         const rcptTo: string[] = [];
         if (session.envelope.rcptTo) {
           for (const r of session.envelope.rcptTo) {
             if (r && typeof r === 'object' && 'address' in r) rcptTo.push(r.address);
           }
         }
+
+        const msgId = parsed.messageId || `<${crypto.randomUUID()}@${customerDomain.domain}>`;
+        const envelopeFrom = `bounce+${authUser.organizationId.slice(0, 8)}@live.noblecircle.online`;
+        const ip = session.remoteAddress || 'unknown';
+        const helo = session.hostNameAppearsAs || 'unknown';
+        const receivedHeader = `Received: from ${helo} (${ip}) by live.noblecircle.online with SMTP; ${new Date().toUTCString()}\r\n`;
+
+        // Preserve original raw message, just prepend Received header
+        let mimeMessage = receivedHeader + raw.toString('utf-8');
+
+        // DKIM sign with the customer domain's key
+        try {
+          const keyData = await getDomainDKIMPrivateKey(customerDomain.id);
+          if (keyData) {
+            const signHdrs = ['from', 'to', 'subject', 'date', 'message-id'];
+            const hdrList = signHdrs.join(':');
+            const hdrStr = signHdrs.map(h => {
+              const val = parsed.headers ? (parsed.headers as any)[h] : undefined;
+              return `${h}:${val || ''}`;
+            }).join('\r\n');
+            const bodyHash = crypto.createHash('sha256').update(parsed.text || parsed.html || '').digest('base64');
+            const sign = crypto.createSign('sha256');
+            sign.update(hdrStr);
+            const b = sign.sign(keyData.privateKey, 'base64');
+            const dkimSignature = `DKIM-Signature: v=1; a=rsa-sha256; d=${customerDomain.domain}; s=${keyData.selector}; h=${hdrList}; bh=${bodyHash}; b=${b}\r\n`;
+            mimeMessage = dkimSignature + mimeMessage;
+          }
+        } catch {}
+
+        // Deliver to all recipients
         const results: { to: string; success: boolean; message: string }[] = [];
 
         for (const recipient of rcptTo) {
@@ -209,30 +194,16 @@ export function createSmtpRelay(): SMTPServer {
         // Record in database
         const allSuccess = results.every(r => r.success);
         await query(
-          `INSERT INTO sent_messages (organization_id, credential_id, customer_domain_id, subdomain_id, mail_from, rcpt_to, subject, body_html, body_text, raw_headers, size, status, message_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          `INSERT INTO sent_messages (organization_id, credential_id, customer_domain_id, mail_from, rcpt_to, subject, body_html, body_text, raw_headers, size, status, message_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
-            authUser.organizationId, authUser.credentialId, customerDomainId, sub.id,
-            mailFrom, rcptTo.join(', '), subject, parsed.html || '', parsed.text || '',
+            authUser.organizationId, authUser.credentialId, customerDomain.id,
+            fromAddr, rcptTo.join(', '), subject,
+            parsed.html || '', parsed.text || '',
             JSON.stringify(parsed.headers || {}), size,
             allSuccess ? 'sent' : 'failed',
             msgId,
           ]
-        );
-
-        // Update subdomain counter
-        await query(
-          'UPDATE subdomains SET emails_sent_today = emails_sent_today + 1, total_sent = total_sent + 1 WHERE id = $1',
-          [sub.id]
-        );
-
-        // Track subdomain pool usage
-        await query(
-          `INSERT INTO subdomain_pool_tracking (subdomain_id, organization_id, last_used_at, total_assigned)
-           VALUES ($1, $2, NOW(), 1)
-           ON CONFLICT (subdomain_id, organization_id)
-           DO UPDATE SET last_used_at = NOW(), total_assigned = subdomain_pool_tracking.total_assigned + 1`,
-          [sub.id, authUser.organizationId]
         );
 
         callback();

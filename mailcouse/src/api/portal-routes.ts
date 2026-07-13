@@ -2,8 +2,10 @@ import { Router, Request, Response } from 'express';
 import { query } from '../db/connection';
 import { authenticate, requireOrg } from './auth-middleware';
 import { generateKeyPair, extractPublicKeyBase64 } from '../dkim/key-generator';
-import { encryptPrivateKey } from '../dkim/key-store';
+import { encryptPrivateKey, getDomainDKIMPrivateKey } from '../dkim/key-store';
 import crypto from 'crypto';
+import * as dns from 'dns';
+import * as net from 'net';
 
 const router = Router();
 router.use(authenticate);
@@ -49,6 +51,205 @@ router.get('/dashboard', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Dashboard error:', err);
     res.status(500).json({ error: 'Failed to load dashboard' });
+  }
+});
+
+// ─── Send Message ─────────────────────────────────────────
+
+function getLastCode(response: string): { code: number; msg: string; isFinal: boolean } | null {
+  const lines = response.trim().split('\r\n');
+  const lastLine = lines[lines.length - 1];
+  const m = lastLine.match(/^(\d{3})([ -])(.*)/);
+  if (!m) return null;
+  return { code: parseInt(m[1]), msg: m[3], isFinal: m[2] === ' ' };
+}
+
+async function deliverToMX(mxHost: string, port: number, envelopeFrom: string, to: string, message: string): Promise<{ success: boolean; code: number; message: string }> {
+  return new Promise((resolve, reject) => {
+    const s = new net.Socket();
+    let buf = '';
+    let step = 0;
+    let settled = false;
+
+    const done = (err?: any, result?: { success: boolean; code: number; message: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      s.destroy();
+      if (err) reject(err);
+      else if (result) resolve(result);
+    };
+
+    const timer = setTimeout(() => done(new Error('SMTP total timeout')), 15000);
+
+    const tryProcess = () => {
+      const parsed = getLastCode(buf);
+      if (!parsed || !parsed.isFinal) return;
+      const { code, msg } = parsed;
+      try {
+        switch (step) {
+          case 0:
+            if (code === 220) { step = 1; s.write(`EHLO mailcouse\r\n`); buf = ''; }
+            else done(null, { success: false, code, message: msg });
+            break;
+          case 1: step = 2; s.write(`MAIL FROM:<${envelopeFrom}>\r\n`); buf = ''; break;
+          case 2:
+            if (code === 250) { step = 3; s.write(`RCPT TO:<${to}>\r\n`); buf = ''; }
+            else done(null, { success: false, code, message: msg });
+            break;
+          case 3:
+            if (code === 250) { step = 4; s.write(`DATA\r\n`); buf = ''; }
+            else done(null, { success: false, code, message: msg });
+            break;
+          case 4:
+            if (code === 354) { s.write(`${message}\r\n.\r\n`); step = 5; buf = ''; }
+            else done(null, { success: false, code, message: msg });
+            break;
+          case 5: done(null, { success: code >= 200 && code < 300, code, message: msg }); break;
+        }
+      } catch (e: any) { done(e); }
+    };
+
+    s.on('data', (data: Buffer) => { buf += data.toString(); tryProcess(); });
+    s.on('error', (err) => done(err));
+    s.on('timeout', () => done(new Error('SMTP idle timeout')));
+    s.setTimeout(15000);
+    s.connect(port, mxHost);
+  });
+}
+
+async function deliverToRecipients(envelopeFrom: string, recipients: string[], rawMessage: string): Promise<{ to: string; success: boolean; code: number; message: string }[]> {
+  const results: { to: string; success: boolean; code: number; message: string }[] = [];
+  for (const recipient of recipients) {
+    try {
+      const domain = recipient.split('@')[1];
+      if (!domain) { results.push({ to: recipient, success: false, code: 0, message: 'Invalid recipient' }); continue; }
+      const mxRecords = await dns.promises.resolveMx(domain);
+      if (!mxRecords || mxRecords.length === 0) {
+        results.push({ to: recipient, success: false, code: 0, message: 'No MX records found' });
+        continue;
+      }
+      mxRecords.sort((a, b) => a.priority - b.priority);
+      let delivered = false;
+      for (const mx of mxRecords) {
+        const result = await deliverToMX(mx.exchange, 25, envelopeFrom, recipient, rawMessage);
+        if (result.success) {
+          results.push({ to: recipient, success: true, code: result.code, message: result.message });
+          delivered = true;
+          break;
+        }
+      }
+      if (!delivered) results.push({ to: recipient, success: false, code: 0, message: 'All MX servers failed' });
+    } catch (err: any) {
+      results.push({ to: recipient, success: false, code: 0, message: err.message });
+    }
+  }
+  return results;
+}
+
+router.post('/send', async (req: Request, res: Response) => {
+  try {
+    const { direction, message: msgData } = req.body;
+    if (!msgData) return res.status(400).json({ error: 'Message data required' });
+
+    const orgId = req.user!.orgId!;
+    const ip = req.ip || '127.0.0.1';
+    const serverResult = await query('SELECT * FROM servers WHERE organization_id = $1', [orgId]);
+    const server = serverResult.rows[0];
+
+    if (direction === 'incoming') {
+      // Incoming message prototype — send to routes
+      const from = msgData.from || 'test@example.com';
+      const to = msgData.to || '';
+      const subject = msgData.subject || 'Test Message';
+      const plainBody = msgData.plain_body || '';
+      const msgId = `<${crypto.randomUUID()}@mailcouse>`;
+      const receivedHeader = `Received: from web-ui (${ip}) by mailcouse with HTTP; ${new Date().toUTCString()}\r\n`;
+
+      let raw = `${receivedHeader}From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\n\r\n${plainBody}`;
+
+      const msgResult = await query(
+        `INSERT INTO sent_messages (organization_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'incoming')
+         RETURNING id`,
+        [orgId, from, to, subject, plainBody, '', raw.length, 'sent', msgId]
+      );
+
+      return res.json({ id: msgResult.rows[0].id, token: msgId });
+    }
+
+    // Outgoing message
+    const from = msgData.from;
+    const to = msgData.to;
+    const subject = msgData.subject || 'Test Message';
+    const plainBody = msgData.plain_body || '';
+
+    if (!from) return res.status(400).json({ error: 'From address is required' });
+    if (!to) return res.status(400).json({ error: 'Recipient is required' });
+
+    const domainPart = from.split('@')[1]?.toLowerCase();
+    if (!domainPart) return res.status(400).json({ error: 'Invalid from address' });
+
+    const domainResult = await query(
+      `SELECT id, domain FROM customer_domains WHERE LOWER(domain) = $1 AND organization_id = $2 AND verified = true`,
+      [domainPart, orgId]
+    );
+    if (domainResult.rows.length === 0) {
+      return res.status(400).json({ error: `From domain ${domainPart} is not verified for this account` });
+    }
+    const customerDomain = domainResult.rows[0];
+
+    const msgId = `<${crypto.randomUUID()}@${customerDomain.domain}>`;
+    const recipients = to.split(/,\s*/).filter(Boolean);
+    if (recipients.length === 0) return res.status(400).json({ error: 'No recipients' });
+
+    const envelopeFrom = `bounce+${orgId.slice(0, 8)}@live.noblecircle.online`;
+    const receivedHeader = `Received: from web-ui (${ip}) by mailcouse with HTTP; ${new Date().toUTCString()}\r\n`;
+
+    let rawMessage = `${receivedHeader}From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${plainBody}`;
+
+    // DKIM sign
+    try {
+      const keyData = await getDomainDKIMPrivateKey(customerDomain.id);
+      if (keyData) {
+        const signHdrs = ['from', 'to', 'subject', 'date', 'message-id'];
+        const hdrList = signHdrs.join(':');
+        const bodyHash = crypto.createHash('sha256').update(plainBody).digest('base64');
+        const sign = crypto.createSign('sha256');
+        sign.update(signHdrs.map(h => `${h}:${(req.body as any)[h] || ''}`).join('\r\n'));
+        const b = sign.sign(keyData.privateKey, 'base64');
+        const dkimSig = `DKIM-Signature: v=1; a=rsa-sha256; d=${customerDomain.domain}; s=${keyData.selector}; h=${hdrList}; bh=${bodyHash}; b=${b}\r\n`;
+        rawMessage = dkimSig + rawMessage;
+      }
+    } catch {}
+
+    // Deliver to all recipients
+    const deliveryResults = await deliverToRecipients(envelopeFrom, recipients, rawMessage);
+    const allSuccess = deliveryResults.every(r => r.success);
+
+    // Record in sent_messages
+    const msgResult = await query(
+      `INSERT INTO sent_messages (organization_id, customer_domain_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'outgoing')
+       RETURNING id`,
+      [orgId, customerDomain.id, from, to, subject, plainBody, '', rawMessage.length, allSuccess ? 'sent' : 'failed', msgId]
+    );
+
+    const messageId = msgResult.rows[0].id;
+
+    // Record delivery attempts
+    for (const dr of deliveryResults) {
+      await query(
+        `INSERT INTO delivery_attempts (sent_message_id, organization_id, rcpt_to, status, smtp_code, details, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [messageId, orgId, dr.to, dr.success ? 'delivered' : 'failed', dr.code, dr.message]
+      );
+    }
+
+    res.json({ id: messageId, token: msgId, deliveries: deliveryResults });
+  } catch (err) {
+    console.error('Send message error:', err);
+    res.status(500).json({ error: 'Failed to send message' });
   }
 });
 
@@ -251,10 +452,19 @@ router.get('/messages', async (req: Request, res: Response) => {
     const offset = (page - 1) * limit;
     const status = req.query.status as string;
     const search = req.query.search as string;
+    const scope = (req.query.scope as string) || 'outgoing';
 
     let where = 'WHERE sm.organization_id = $1';
     const params: any[] = [req.user!.orgId!];
     let paramIdx = 2;
+
+    if (scope === 'held') {
+      where += ` AND sm.status = 'held'`;
+    } else {
+      where += ` AND sm.scope = $${paramIdx++}`;
+      params.push(scope);
+      where += ` AND (sm.status IS DISTINCT FROM 'held')`;
+    }
 
     if (status) {
       where += ` AND sm.status = $${paramIdx++}`;
@@ -274,7 +484,7 @@ router.get('/messages', async (req: Request, res: Response) => {
 
     params.push(limit, offset);
     const messages = await query(
-      `SELECT sm.id, sm.mail_from, sm.rcpt_to, sm.subject, sm.status, sm.bounce, sm.size, sm.created_at,
+      `SELECT sm.id, sm.mail_from, sm.rcpt_to, sm.subject, sm.status, sm.bounce, sm.size, sm.scope, sm.created_at,
               sc.name as credential_name
        FROM sent_messages sm
        LEFT JOIN smtp_credentials sc ON sc.id = sm.credential_id
@@ -302,20 +512,133 @@ router.get('/messages', async (req: Request, res: Response) => {
 router.get('/messages/:id', async (req: Request, res: Response) => {
   try {
     const result = await query(
-      `SELECT sm.*, sc.name as credential_name, cd.domain as domain_name, s.subdomain
+      `SELECT sm.*, sc.name as credential_name, cd.domain as domain_name
        FROM sent_messages sm
        LEFT JOIN smtp_credentials sc ON sc.id = sm.credential_id
        LEFT JOIN customer_domains cd ON cd.id = sm.customer_domain_id
-       LEFT JOIN subdomains s ON s.id = sm.subdomain_id
        WHERE sm.id = $1 AND sm.organization_id = $2`,
       [req.params.id, req.user!.orgId!]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Message not found' });
     }
-    res.json({ message: result.rows[0] });
+    const message = result.rows[0];
+
+    const deliveriesResult = await query(
+      `SELECT * FROM delivery_attempts WHERE sent_message_id = $1 ORDER BY timestamp DESC`,
+      [req.params.id]
+    );
+    message.deliveries = deliveriesResult.rows;
+
+    res.json({ message });
   } catch {
     res.status(500).json({ error: 'Failed to get message' });
+  }
+});
+
+// ─── Message Deliveries ───────────────────────────────────
+
+router.get('/messages/:id/deliveries', async (req: Request, res: Response) => {
+  try {
+    const deliveriesResult = await query(
+      `SELECT * FROM delivery_attempts WHERE sent_message_id = $1 AND organization_id = $2 ORDER BY timestamp DESC`,
+      [req.params.id, req.user!.orgId!]
+    );
+    res.json({ deliveries: deliveriesResult.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to load deliveries' });
+  }
+});
+
+// ─── Webhook History ─────────────────────────────────────
+
+router.get('/webhooks/history', async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    const countResult = await query<{ cnt: string }>(
+      'SELECT COUNT(*) as cnt FROM webhook_requests WHERE organization_id = $1',
+      [req.user!.orgId!]
+    );
+    const total = parseInt(countResult.rows[0].cnt);
+
+    const result = await query(
+      `SELECT * FROM webhook_requests WHERE organization_id = $1 ORDER BY timestamp DESC LIMIT $2 OFFSET $3`,
+      [req.user!.orgId!, limit, offset]
+    );
+
+    res.json({
+      requests: result.rows,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch {
+    res.status(500).json({ error: 'Failed to load webhook history' });
+  }
+});
+
+router.get('/webhooks/history/:uuid', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT * FROM webhook_requests WHERE uuid = $1 AND organization_id = $2',
+      [req.params.uuid, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Request not found' });
+    res.json({ request: result.rows[0] });
+  } catch {
+    res.status(500).json({ error: 'Failed to load request' });
+  }
+});
+
+// ─── Advanced Settings ────────────────────────────────────
+
+router.post('/settings/advanced', async (req: Request, res: Response) => {
+  try {
+    const { send_limit, allow_sender, privacy_mode, message_retention_days, raw_message_retention_days, raw_message_retention_size } = req.body;
+    await query(
+      `UPDATE servers SET
+       send_limit = $1, allow_sender = $2, privacy_mode = $3,
+       message_retention_days = $4, raw_message_retention_days = $5, raw_message_retention_size = $6
+       WHERE organization_id = $7`,
+      [
+        send_limit ? parseInt(send_limit) : null,
+        allow_sender === 'true',
+        privacy_mode === 'true',
+        message_retention_days ? parseInt(message_retention_days) : null,
+        raw_message_retention_days ? parseInt(raw_message_retention_days) : null,
+        raw_message_retention_size ? parseInt(raw_message_retention_size) : null,
+        req.user!.orgId!,
+      ]
+    );
+    res.json({ message: 'Settings saved' });
+  } catch {
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
+router.post('/settings/suspend', async (req: Request, res: Response) => {
+  try {
+    const { reason } = req.body;
+    await query(
+      `UPDATE servers SET suspended_at = NOW(), suspension_reason = $1 WHERE organization_id = $2`,
+      [reason || 'No reason given', req.user!.orgId!]
+    );
+    res.json({ message: 'Server suspended' });
+  } catch {
+    res.status(500).json({ error: 'Failed to suspend server' });
+  }
+});
+
+router.post('/settings/unsuspend', async (req: Request, res: Response) => {
+  try {
+    await query(
+      `UPDATE servers SET suspended_at = NULL, suspension_reason = NULL WHERE organization_id = $1`,
+      [req.user!.orgId!]
+    );
+    res.json({ message: 'Server unsuspended' });
+  } catch {
+    res.status(500).json({ error: 'Failed to unsuspend server' });
   }
 });
 
@@ -337,7 +660,22 @@ router.get('/settings', async (req: Request, res: Response) => {
       [req.user!.orgId!]
     );
 
-    res.json({ organization: orgResult.rows[0], members: memberResult.rows });
+    const serverResult = await query(
+      `SELECT * FROM servers WHERE organization_id = $1`,
+      [req.user!.orgId!]
+    );
+
+    const credentialResult = await query(
+      `SELECT name, username FROM smtp_credentials WHERE organization_id = $1 AND type = 'smtp' ORDER BY created_at DESC LIMIT 1`,
+      [req.user!.orgId!]
+    );
+
+    res.json({
+      organization: orgResult.rows[0],
+      members: memberResult.rows,
+      server: serverResult.rows[0] || null,
+      credentials: credentialResult.rows,
+    });
   } catch {
     res.status(500).json({ error: 'Failed to load settings' });
   }
@@ -376,11 +714,11 @@ router.get('/routes', async (req: Request, res: Response) => {
 
 router.post('/routes', async (req: Request, res: Response) => {
   try {
-    const { domain, matchType, matchValue, actionType, actionValue, priority } = req.body;
+    const { name, domain, matchType, matchValue, actionType, actionValue, priority } = req.body;
     const result = await query<{ id: string }>(
-      `INSERT INTO routes (organization_id, domain, match_type, match_value, action_type, action_value, priority)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [req.user!.orgId!, domain || null, matchType || 'catch_all', matchValue || '', actionType || 'webhook', actionValue || '', priority || 10]
+      `INSERT INTO routes (organization_id, name, domain, match_type, match_value, action_type, action_value, priority)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [req.user!.orgId!, name || 'Unnamed Route', domain || null, matchType || 'catch_all', matchValue || '', actionType || 'webhook', actionValue || '', priority || 10]
     );
     res.status(201).json({ id: result.rows[0].id });
   } catch {
@@ -413,11 +751,11 @@ router.get('/webhooks', async (req: Request, res: Response) => {
 
 router.post('/webhooks', async (req: Request, res: Response) => {
   try {
-    const { endpointUrl, events } = req.body;
+    const { name, endpointUrl, events } = req.body;
     if (!endpointUrl) return res.status(400).json({ error: 'Endpoint URL required' });
     const result = await query<{ id: string }>(
-      `INSERT INTO webhooks (organization_id, endpoint_url, events) VALUES ($1, $2, $3) RETURNING id`,
-      [req.user!.orgId!, endpointUrl, events || []]
+      `INSERT INTO webhooks (organization_id, name, endpoint_url, events) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [req.user!.orgId!, name || 'Unnamed Webhook', endpointUrl, events || []]
     );
     res.status(201).json({ id: result.rows[0].id });
   } catch {
@@ -462,12 +800,74 @@ router.post('/track-domains', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/track-domains/:id/toggle-ssl', async (req: Request, res: Response) => {
+  try {
+    const result = await query<{ ssl_enabled: boolean }>(
+      'SELECT ssl_enabled FROM track_domains WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Track domain not found' });
+    const current = result.rows[0].ssl_enabled;
+    await query(
+      'UPDATE track_domains SET ssl_enabled = $1 WHERE id = $2',
+      [!current, req.params.id]
+    );
+    res.json({ ssl_enabled: !current });
+  } catch {
+    res.status(500).json({ error: 'Failed to toggle SSL' });
+  }
+});
+
+router.post('/track-domains/:id/check', async (req: Request, res: Response) => {
+  try {
+    const result = await query<{ id: string; domain: string }>(
+      'SELECT id, domain FROM track_domains WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Track domain not found' });
+    const { domain } = result.rows[0];
+    const dns = require('dns').promises;
+    let dnsStatus = 'missing';
+    let dnsError = '';
+    try {
+      const cnameRecords = await dns.resolveCname(domain);
+      if (cnameRecords.some((r: string) => r.includes('mailcouse') || r.includes('noblecircle'))) {
+        dnsStatus = 'OK';
+      } else {
+        dnsError = 'CNAME does not point to the expected target';
+      }
+    } catch (err: any) {
+      dnsError = err.message;
+    }
+    await query(
+      'UPDATE track_domains SET dns_verified = $1, dns_status = $2, dns_error = $3 WHERE id = $4',
+      [dnsStatus === 'OK', dnsStatus, dnsError, req.params.id]
+    );
+    res.json({ dns_status: dnsStatus, message: dnsStatus === 'OK' ? 'DNS looks good!' : 'DNS check failed: ' + dnsError });
+  } catch {
+    res.status(500).json({ error: 'Failed to check DNS' });
+  }
+});
+
 router.delete('/track-domains/:id', async (req: Request, res: Response) => {
   try {
     await query('DELETE FROM track_domains WHERE id = $1 AND organization_id = $2', [req.params.id, req.user!.orgId!]);
     res.json({ message: 'Track domain removed' });
   } catch {
     res.status(500).json({ error: 'Failed to delete track domain' });
+  }
+});
+
+// ─── Suppressions ────────────────────────────────────────────
+
+router.get('/suppressions', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT * FROM suppression_list ORDER BY suppressed_at DESC LIMIT 100'
+    );
+    res.json({ suppressions: result.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to list suppressions' });
   }
 });
 

@@ -103,6 +103,32 @@ export async function getDKIMPrivateKey(
 }
 
 /**
+ * Retrieve and decrypt DKIM private key for a customer domain
+ */
+export async function getDomainDKIMPrivateKey(
+  domainId: string
+): Promise<{ privateKey: string; selector: string } | null> {
+  const result = await query<{ dkim_private_key: string; dkim_selector: string }>(
+    'SELECT dkim_private_key, dkim_selector FROM customer_domains WHERE id = $1',
+    [domainId]
+  );
+
+  if (result.rows.length === 0 || !result.rows[0].dkim_private_key) {
+    return null;
+  }
+
+  const { dkim_private_key, dkim_selector } = result.rows[0];
+
+  try {
+    const privateKey = decryptPrivateKey(dkim_private_key);
+    return { privateKey, selector: dkim_selector };
+  } catch (error) {
+    console.error('Failed to decrypt domain DKIM key:', error);
+    return null;
+  }
+}
+
+/**
  * Check if subdomain has DKIM keys
  */
 export async function hasDKIMKeys(subdomainId: string): Promise<boolean> {
