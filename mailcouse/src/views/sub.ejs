@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en" class="subPage">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mailcouse — <%= title %></title>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/postal.css">
+</head>
+<body>
+  <div class="subPageBox<% if (typeof wide !== 'undefined' && wide) { %> subPageBox--wide<% } %>">
+    <div class="subPageBox__title"><%= title %></div>
+    <div class="subPageBox__content">
+      <%- body %>
+    </div>
+  </div>
+</body>
+</html>

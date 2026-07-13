@@ -343,4 +343,152 @@ router.get('/settings', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Servers ────────────────────────────────────────────────
+
+router.get('/servers', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT s.*, cd.domain as return_path_domain
+       FROM servers s
+       LEFT JOIN customer_domains cd ON cd.id = s.return_path_domain_id
+       WHERE s.organization_id = $1`,
+      [_req.user!.orgId!]
+    );
+    res.json({ servers: result.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to list servers' });
+  }
+});
+
+// ─── Routes ─────────────────────────────────────────────────
+
+router.get('/routes', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT * FROM routes WHERE organization_id = $1 ORDER BY priority ASC',
+      [req.user!.orgId!]
+    );
+    res.json({ routes: result.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to list routes' });
+  }
+});
+
+router.post('/routes', async (req: Request, res: Response) => {
+  try {
+    const { domain, matchType, matchValue, actionType, actionValue, priority } = req.body;
+    const result = await query<{ id: string }>(
+      `INSERT INTO routes (organization_id, domain, match_type, match_value, action_type, action_value, priority)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [req.user!.orgId!, domain || null, matchType || 'catch_all', matchValue || '', actionType || 'webhook', actionValue || '', priority || 10]
+    );
+    res.status(201).json({ id: result.rows[0].id });
+  } catch {
+    res.status(500).json({ error: 'Failed to create route' });
+  }
+});
+
+router.delete('/routes/:id', async (req: Request, res: Response) => {
+  try {
+    await query('DELETE FROM routes WHERE id = $1 AND organization_id = $2', [req.params.id, req.user!.orgId!]);
+    res.json({ message: 'Route removed' });
+  } catch {
+    res.status(500).json({ error: 'Failed to delete route' });
+  }
+});
+
+// ─── Webhooks ───────────────────────────────────────────────
+
+router.get('/webhooks', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT * FROM webhooks WHERE organization_id = $1 ORDER BY created_at DESC',
+      [req.user!.orgId!]
+    );
+    res.json({ webhooks: result.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to list webhooks' });
+  }
+});
+
+router.post('/webhooks', async (req: Request, res: Response) => {
+  try {
+    const { endpointUrl, events } = req.body;
+    if (!endpointUrl) return res.status(400).json({ error: 'Endpoint URL required' });
+    const result = await query<{ id: string }>(
+      `INSERT INTO webhooks (organization_id, endpoint_url, events) VALUES ($1, $2, $3) RETURNING id`,
+      [req.user!.orgId!, endpointUrl, events || []]
+    );
+    res.status(201).json({ id: result.rows[0].id });
+  } catch {
+    res.status(500).json({ error: 'Failed to create webhook' });
+  }
+});
+
+router.delete('/webhooks/:id', async (req: Request, res: Response) => {
+  try {
+    await query('DELETE FROM webhooks WHERE id = $1 AND organization_id = $2', [req.params.id, req.user!.orgId!]);
+    res.json({ message: 'Webhook removed' });
+  } catch {
+    res.status(500).json({ error: 'Failed to delete webhook' });
+  }
+});
+
+// ─── Track Domains ──────────────────────────────────────────
+
+router.get('/track-domains', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT * FROM track_domains WHERE organization_id = $1 ORDER BY created_at DESC',
+      [req.user!.orgId!]
+    );
+    res.json({ trackDomains: result.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to list track domains' });
+  }
+});
+
+router.post('/track-domains', async (req: Request, res: Response) => {
+  try {
+    const { domain } = req.body;
+    if (!domain) return res.status(400).json({ error: 'Domain required' });
+    const result = await query<{ id: string }>(
+      'INSERT INTO track_domains (organization_id, domain) VALUES ($1, $2) RETURNING id',
+      [req.user!.orgId!, domain.toLowerCase()]
+    );
+    res.status(201).json({ id: result.rows[0].id, domain: domain.toLowerCase() });
+  } catch {
+    res.status(500).json({ error: 'Failed to add track domain' });
+  }
+});
+
+router.delete('/track-domains/:id', async (req: Request, res: Response) => {
+  try {
+    await query('DELETE FROM track_domains WHERE id = $1 AND organization_id = $2', [req.params.id, req.user!.orgId!]);
+    res.json({ message: 'Track domain removed' });
+  } catch {
+    res.status(500).json({ error: 'Failed to delete track domain' });
+  }
+});
+
+// ─── Subdomain Pool ─────────────────────────────────────────
+
+router.get('/pool', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT s.subdomain, d.domain as root_domain, s.status, s.emails_sent_today, s.daily_limit,
+              s.total_sent, s.engagement_score, s.sender_name,
+              spt.last_used_at, spt.total_assigned
+       FROM subdomains s
+       JOIN domains d ON d.id = s.domain_id
+       LEFT JOIN subdomain_pool_tracking spt ON spt.subdomain_id = s.id AND spt.organization_id = $1
+       ORDER BY spt.last_used_at DESC NULLS LAST`,
+      [req.user!.orgId!]
+    );
+    res.json({ pool: result.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to list pool' });
+  }
+});
+
 export default router;

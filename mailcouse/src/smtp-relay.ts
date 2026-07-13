@@ -226,6 +226,15 @@ export function createSmtpRelay(): SMTPServer {
           [sub.id]
         );
 
+        // Track subdomain pool usage
+        await query(
+          `INSERT INTO subdomain_pool_tracking (subdomain_id, organization_id, last_used_at, total_assigned)
+           VALUES ($1, $2, NOW(), 1)
+           ON CONFLICT (subdomain_id, organization_id)
+           DO UPDATE SET last_used_at = NOW(), total_assigned = subdomain_pool_tracking.total_assigned + 1`,
+          [sub.id, authUser.organizationId]
+        );
+
         callback();
       } catch (err: any) {
         console.error('SMTP data error:', err);

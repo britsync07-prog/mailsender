@@ -546,3 +546,88 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+
+-- ============================================================
+-- SERVERS (Postal-like — maps to organizations with extra settings)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS servers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    mode VARCHAR(20) NOT NULL DEFAULT 'live',
+    spf_include VARCHAR(255),
+    dkim_private_key TEXT,
+    dkim_public_key TEXT,
+    dkim_selector VARCHAR(50) DEFAULT 'mailcouse',
+    return_path_domain_id UUID REFERENCES customer_domains(id) ON DELETE SET NULL,
+    outgoing_domain_id UUID REFERENCES customer_domains(id) ON DELETE SET NULL,
+    suspension_reason TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_servers_org_id ON servers(organization_id);
+
+-- ============================================================
+-- ROUTES (Postal-like — for forwarding, webhook, or holding)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS routes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    domain VARCHAR(255),
+    match_type VARCHAR(50) NOT NULL DEFAULT 'catch_all',
+    match_value VARCHAR(255),
+    action_type VARCHAR(50) NOT NULL DEFAULT 'webhook',
+    action_value TEXT,
+    priority INTEGER NOT NULL DEFAULT 10,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_routes_org_id ON routes(organization_id);
+CREATE INDEX IF NOT EXISTS idx_routes_domain ON routes(domain);
+
+-- ============================================================
+-- WEBHOOKS (Postal-like — event notifications)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS webhooks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    endpoint_url VARCHAR(500) NOT NULL,
+    events TEXT[] NOT NULL DEFAULT '{}',
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    last_delivered_at TIMESTAMP,
+    last_delivery_status VARCHAR(50),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhooks_org_id ON webhooks(organization_id);
+
+-- ============================================================
+-- TRACK DOMAINS (Postal-like — open/click tracking domains)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS track_domains (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    domain VARCHAR(255) NOT NULL UNIQUE,
+    ssl_enabled BOOLEAN NOT NULL DEFAULT true,
+    dns_verified BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_track_domains_org_id ON track_domains(organization_id);
+CREATE INDEX IF NOT EXISTS idx_track_domains_domain ON track_domains(domain);
+
+-- ============================================================
+-- SUBDOMAIN POOL TRACKING
+-- ============================================================
+CREATE TABLE IF NOT EXISTS subdomain_pool_tracking (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    subdomain_id UUID NOT NULL REFERENCES subdomains(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    last_used_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    total_assigned INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(subdomain_id, organization_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pool_tracking_subdomain ON subdomain_pool_tracking(subdomain_id);
+CREATE INDEX IF NOT EXISTS idx_pool_tracking_org ON subdomain_pool_tracking(organization_id);

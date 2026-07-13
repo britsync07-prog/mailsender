@@ -1,46 +1,62 @@
-<div class="page-header">
-  <h2>Settings</h2>
+<div class="pageHeader">
+  <div class="pageHeader__title">Settings</div>
 </div>
 
-<div class="card">
-  <div class="card-header"><h3>Organization</h3></div>
-  <table class="table-details">
-    <tr><th>Name</th><td><%= org.name %></td></tr>
-    <tr><th>ID</th><td class="mono"><%= org.id %></td></tr>
-    <tr><th>Created</th><td><%= org.created_at %></td></tr>
-  </table>
-</div>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link is-active">Settings</a></li>
+  </ul>
+</nav>
 
-<div class="card">
-  <div class="card-header"><h3>Team Members</h3></div>
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Email</th>
-        <th>Role</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% members.forEach(function(m) { %>
-        <tr>
-          <td><%= m.name %></td>
-          <td><%= m.email %></td>
-          <td><span class="badge badge-<%= m.role %>"><%= m.role %></span></td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
-</div>
+<div class="pageContent pageContent--sidebar">
 
-<div class="card">
-  <div class="card-header"><h3>SMTP Configuration</h3></div>
-  <p>Use these settings in your email client or application:</p>
-  <table class="table-details">
-    <tr><th>Server</th><td><code>live.noblecircle.online</code></td></tr>
-    <tr><th>Port</th><td><code>587</code> (STARTTLS) / <code>25</code> (plain)</td></tr>
-    <tr><th>Authentication</th><td>PLAIN / LOGIN</td></tr>
-    <tr><th>Username</th><td>Your SMTP credential username</td></tr>
-    <tr><th>Password</th><td>Your SMTP credential password</td></tr>
-  </table>
+  <!-- Organization -->
+  <div class="tabular" style="margin-bottom:20px;">
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Organization</h3>
+    <table class="dataTable">
+      <tr><th style="width:140px;">Name</th><td><%= org.name %></td></tr>
+      <tr><th>ID</th><td class="mono"><%= org.id %></td></tr>
+      <tr><th>Created</th><td><%= org.created_at %></td></tr>
+    </table>
+  </div>
+
+  <!-- Team Members -->
+  <div class="tabular" style="margin-bottom:20px;">
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Team Members</h3>
+    <table class="dataTable">
+      <thead>
+        <tr><td>Name</td><td>Email</td><td>Role</td></tr>
+      </thead>
+      <tbody>
+        <% members.forEach(function(m) { %>
+          <tr>
+            <td><%= m.name %></td>
+            <td><%= m.email %></td>
+            <td><span class="label label--<%= m.role === 'owner' ? 'purple' : 'blue' %>"><%= m.role %></span></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- SMTP Configuration -->
+  <div class="tabular" style="margin-bottom:20px;">
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">SMTP Configuration</h3>
+    <p style="color:#666;font-size:13px;margin-bottom:15px;">Use these settings in your email client or application:</p>
+    <table class="dataTable">
+      <tr><th style="width:140px;">Server</th><td><code>live.noblecircle.online</code></td></tr>
+      <tr><th>Port</th><td><code>587</code> (STARTTLS) / <code>25</code> (plain)</td></tr>
+      <tr><th>Authentication</th><td>PLAIN / LOGIN</td></tr>
+      <tr><th>Encryption</th><td>STARTTLS</td></tr>
+      <tr><th>Username</th><td>Your SMTP credential username</td></tr>
+      <tr><th>Password</th><td>Your SMTP credential password</td></tr>
+    </table>
+  </div>
+
+  <!-- Danger Zone -->
+  <div class="dangerZone">
+    <div class="dangerZone__title">Danger Zone</div>
+    <div class="dangerZone__text">Transferring organization ownership or deleting the organization cannot be undone.</div>
+  </div>
+
 </div>

@@ -1,69 +1,83 @@
-<div class="page-header">
-  <h2>Domains</h2>
-  <button class="btn btn-primary" onclick="showAddDomain()">Add Domain</button>
+<div class="pageHeader">
+  <div class="pageHeader__title">Domains</div>
 </div>
 
-<div class="card">
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Domain</th>
-        <th>Status</th>
-        <th>SPF</th>
-        <th>DKIM</th>
-        <th>MX</th>
-        <th>Outgoing</th>
-        <th>Added</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      <% if (domains.length === 0) { %>
-        <tr><td colspan="8" class="empty">No domains yet. Add your first domain!</td></tr>
-      <% } %>
-      <% domains.forEach(function(d) { %>
-        <tr>
-          <td><strong><%= d.domain %></strong></td>
-          <td>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link is-active">Domains</a></li>
+    <li class="navBar__item navBar__item--end">
+      <a href="javascript:showAddDomain()" class="navBar__link">+ Add Domain</a>
+    </li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--sidebar">
+  <div class="domainList">
+    <% if (domains.length === 0) { %>
+      <div class="noData">
+        <div class="noData__title">No domains</div>
+        <div class="noData__text">Add a domain to start sending email.</div>
+        <div class="noData__button">
+          <a href="javascript:showAddDomain()" class="button">Add Domain</a>
+        </div>
+      </div>
+    <% } %>
+    <% domains.forEach(function(d) { %>
+      <div class="domainList__item">
+        <div class="domainList__details">
+          <div class="domainList__name">
+            <%= d.domain %>
             <% if (d.verified) { %>
-              <span class="badge badge-verified">Verified</span>
+              <span class="label label--green">Verified</span>
             <% } else { %>
-              <span class="badge badge-pending">Pending</span>
+              <span class="label label--orange">Pending</span>
             <% } %>
-          </td>
-          <td><span class="badge badge-<%= d.spf_status === 'ok' ? 'verified' : 'pending' %>"><%= d.spf_status || '—' %></span></td>
-          <td><span class="badge badge-<%= d.dkim_status === 'ok' ? 'verified' : 'pending' %>"><%= d.dkim_status || '—' %></span></td>
-          <td><span class="badge badge-<%= d.mx_status === 'ok' ? 'verified' : 'pending' %>"><%= d.mx_status || '—' %></span></td>
-          <td><%= d.outgoing ? 'Yes' : 'No' %></td>
-          <td><%= d.created_at %></td>
-          <td>
-            <button class="btn btn-sm" onclick="verifyDomain('<%= d.id %>')">Verify</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteDomain('<%= d.id %>')">Del</button>
-          </td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
+          </div>
+          <div class="domainList__checks">
+            <span class="domainList__check domainList__check--<%= d.spf_status === 'ok' ? 'ok' : 'neutral' %>">SPF</span>
+            <span class="domainList__check domainList__check--<%= d.dkim_status === 'ok' ? 'ok' : 'neutral' %>">DKIM</span>
+            <span class="domainList__check domainList__check--<%= d.mx_status === 'ok' ? 'ok' : 'neutral' %>">MX</span>
+            <span class="domainList__check domainList__check--<%= d.return_path_status === 'ok' ? 'ok' : 'neutral' %>">DMARC</span>
+          </div>
+        </div>
+        <div class="domainList__properties">
+          <div class="domainList__verificationTime">
+            <% if (d.verified_at) { %>
+              Verified <time><%= d.verified_at %></time>
+            <% } else { %>
+              Not verified
+            <% } %>
+          </div>
+          <div class="domainList__links">
+            <a href="javascript:verifyDomain('<%= d.id %>')" class="domainList__verificationLink">Verify DNS</a>
+            <a href="javascript:deleteDomain('<%= d.id %>')" class="domainList__delete">Delete</a>
+          </div>
+        </div>
+      </div>
+    <% }) %>
+  </div>
 </div>
 
 <!-- Add Domain Modal -->
 <div id="domain-modal" class="modal" style="display:none">
-  <div class="modal-backdrop" onclick="hideAddDomain()"></div>
-  <div class="modal-content">
-    <h3>Add Domain</h3>
-    <p>Enter the domain you want to send email from.</p>
-    <div class="form-group">
-      <label>Domain</label>
-      <input type="text" id="new-domain" placeholder="example.com">
+  <div class="modal__backdrop" onclick="hideAddDomain()"></div>
+  <div class="modal__content">
+    <div class="modal__header">Add Domain</div>
+    <div class="modal__body">
+      <p>Enter the domain you want to send email from.</p>
+      <div class="formBlock">
+        <label>Domain</label>
+        <input type="text" id="new-domain" placeholder="example.com">
+      </div>
+      <div id="domain-dns-records" style="display:none">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;">DNS Records</h3>
+        <p style="font-size:12px;color:#999;margin-bottom:10px;">Add these DNS records to your domain provider's DNS settings:</p>
+        <pre id="dns-records-output" class="mono" style="background:#f5f5f5;padding:12px;border-radius:3px;font-size:12px;overflow-x:auto;"></pre>
+      </div>
     </div>
-    <div id="domain-dns-records" style="display:none">
-      <h4>DNS Records</h4>
-      <p>Add these DNS records to your domain provider:</p>
-      <pre id="dns-records-output"></pre>
-    </div>
-    <div class="form-actions">
-      <button class="btn" onclick="hideAddDomain()">Cancel</button>
-      <button class="btn btn-primary" id="add-domain-btn" onclick="addDomain()">Add Domain</button>
+    <div class="modal__footer">
+      <button class="button button--neutral" onclick="hideAddDomain()">Cancel</button>
+      <button class="button" id="add-domain-btn" onclick="addDomain()">Add Domain</button>
     </div>
   </div>
 </div>
@@ -73,32 +87,32 @@ function showAddDomain() { document.getElementById('domain-modal').style.display
 function hideAddDomain() { document.getElementById('domain-modal').style.display = 'none'; }
 
 async function addDomain() {
-  const domain = document.getElementById('new-domain').value.trim();
+  var domain = document.getElementById('new-domain').value.trim();
   if (!domain) return alert('Enter a domain name');
-  const btn = document.getElementById('add-domain-btn');
+  var btn = document.getElementById('add-domain-btn');
   btn.disabled = true; btn.textContent = 'Adding...';
   try {
-    const res = await fetch('/api/portal/domains', { method: 'POST',
+    var res = await fetch('/api/portal/domains', { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer <%= token %>' },
-      body: JSON.stringify({ domain })
+      body: JSON.stringify({ domain: domain })
     });
-    const data = await res.json();
+    var data = await res.json();
     if (!res.ok) return alert(data.error);
     document.getElementById('dns-records-output').textContent =
-      `SPF: ${data.dnsRecords.spf}\nDKIM: ${data.dnsRecords.dkim}\nMX: ${data.dnsRecords.mx}`;
+      'SPF: ' + data.dnsRecords.spf + '\nDKIM: ' + data.dnsRecords.dkim + '\nMX: ' + data.dnsRecords.mx;
     document.getElementById('domain-dns-records').style.display = 'block';
     document.getElementById('new-domain').disabled = true;
     btn.textContent = 'Close';
-    btn.onclick = () => location.reload();
+    btn.onclick = function() { location.reload(); };
   } catch(e) { alert('Error: ' + e.message); btn.disabled = false; btn.textContent = 'Add Domain'; }
 }
 
 async function verifyDomain(id) {
-  const res = await fetch('/api/portal/domains/' + id + '/verify', {
+  var res = await fetch('/api/portal/domains/' + id + '/verify', {
     headers: { 'Authorization': 'Bearer <%= token %>' }
   });
-  const data = await res.json();
-  alert('Verification: ' + (data.verified ? 'ALL OK' : 'Some checks failed. Check records.') + '\n\n' +
+  var data = await res.json();
+  alert('Verification: ' + (data.verified ? 'ALL OK' : 'Some checks failed') + '\n\n' +
     'SPF: ' + data.checks.spf + '\nDKIM: ' + data.checks.dkim + '\nMX: ' + data.checks.mx + '\nDMARC: ' + data.checks.return_path);
   location.reload();
 }

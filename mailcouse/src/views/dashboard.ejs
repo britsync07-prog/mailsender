@@ -1,47 +1,67 @@
-<div class="page-header">
-  <h2>Dashboard</h2>
+<div class="pageHeader">
+  <div class="pageHeader__title">Dashboard</div>
 </div>
 
-<div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-value"><%= stats.domains %></div>
-    <div class="stat-label">Domains</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value"><%= stats.credentials %></div>
-    <div class="stat-label">SMTP Credentials</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value"><%= stats.messagesSent %></div>
-    <div class="stat-label">Messages Sent</div>
-  </div>
-</div>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link is-active">Overview</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/messages" class="navBar__link">View all messages</a></li>
+  </ul>
+</nav>
 
-<div class="card">
-  <div class="card-header"><h3>Recent Messages</h3></div>
-  <table class="table">
-    <thead>
-      <tr>
-        <th>From</th>
-        <th>To</th>
-        <th>Subject</th>
-        <th>Status</th>
-        <th>Date</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% if (recentMessages.length === 0) { %>
-        <tr><td colspan="5" class="empty">No messages yet. Start sending!</td></tr>
-      <% } %>
-      <% recentMessages.forEach(function(msg) { %>
-        <tr>
-          <td class="mono"><%= msg.mail_from %></td>
-          <td><%= msg.rcpt_to %></td>
-          <td><%= msg.subject || '(no subject)' %></td>
-          <td><span class="badge badge-<%= msg.status %>"><%= msg.status %></span></td>
-          <td><%= msg.created_at %></td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
+<div class="pageContent pageContent--sidebar">
+
+  <!-- Stats cards -->
+  <div style="display:flex;gap:20px;margin-bottom:25px;">
+    <div style="flex:1;background:#fff;border-radius:4px;padding:20px;box-shadow:0 0 10px rgba(0,0,0,0.1);text-align:center;">
+      <div style="font-size:36px;font-weight:300;color:var(--blue);"><%= stats.domains %></div>
+      <div style="font-size:13px;color:#999;margin-top:5px;">Domains</div>
+    </div>
+    <div style="flex:1;background:#fff;border-radius:4px;padding:20px;box-shadow:0 0 10px rgba(0,0,0,0.1);text-align:center;">
+      <div style="font-size:36px;font-weight:300;color:var(--turquoise);"><%= stats.credentials %></div>
+      <div style="font-size:13px;color:#999;margin-top:5px;">SMTP Credentials</div>
+    </div>
+    <div style="flex:1;background:#fff;border-radius:4px;padding:20px;box-shadow:0 0 10px rgba(0,0,0,0.1);text-align:center;">
+      <div style="font-size:36px;font-weight:300;color:var(--green);"><%= stats.messagesSent %></div>
+      <div style="font-size:13px;color:#999;margin-top:5px;">Messages Sent</div>
+    </div>
+  </div>
+
+  <!-- Mail Graph placeholder -->
+  <div class="mailGraph">
+    <ul class="mailGraph__key">
+      <li>Incoming</li>
+      <li class="mailGraph__key--out">Outgoing</li>
+    </ul>
+    <div class="mailGraph__empty">Mail activity graph will appear here.</div>
+  </div>
+
+  <!-- Recent Messages -->
+  <div class="messageList">
+    <% if (recentMessages.length === 0) { %>
+      <div class="messageList__message">
+        <div class="messageList__link" style="justify-content:center;color:#999;padding:30px;text-align:center;">
+          No messages yet. Add a domain and create credentials to start sending.
+        </div>
+      </div>
+    <% } %>
+    <% recentMessages.forEach(function(msg) { %>
+      <div class="messageList__message">
+        <a href="/portal/messages/<%= msg.id %>" class="messageList__link">
+          <div class="messageList__details">
+            <div class="messageList__subject"><%= msg.subject || '(no subject)' %></div>
+            <dl class="messageList__addresses">
+              <dt>From:</dt><dd><%= msg.mail_from %></dd>
+              <dt>To:</dt><dd><%= msg.rcpt_to %></dd>
+            </dl>
+          </div>
+          <div class="messageList__meta">
+            <div class="messageList__timestamp"><%= msg.created_at %></div>
+            <span class="label label--<%= msg.status === 'sent' ? 'green' : msg.status === 'bounced' ? 'red' : 'orange' %>"><%= msg.status %></span>
+          </div>
+        </a>
+      </div>
+    <% }) %>
+  </div>
+
 </div>

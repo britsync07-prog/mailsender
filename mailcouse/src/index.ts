@@ -5,6 +5,7 @@ import compression from 'compression';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
+import layouts from 'express-ejs-layouts';
 import { config } from './config';
 import { initializeDatabase, closePool } from './db/connection';
 import apiRoutes from './api/routes';
@@ -35,6 +36,8 @@ app.use(cookieParser());
 // EJS view engine for Postal-like UI
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+app.set('layout extractScripts', true);
+app.use(layouts);
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use((req, res, next) => {
@@ -117,12 +120,12 @@ app.post('/login', async (req, res) => {
     });
     const data = await apiRes.json();
     if (!apiRes.ok) {
-      return res.render('login', { title: 'Sign In', mode: 'login', error: data.error });
+      return res.render('login', { layout: 'sub', title: 'Sign In', mode: 'login', error: data.error });
     }
     res.cookie('token', data.token, { httpOnly: true, maxAge: config.platform.sessionExpiryHours * 3600000 });
     res.redirect('/portal/dashboard');
   } catch {
-    res.render('login', { title: 'Sign In', mode: 'login', error: 'Login failed' });
+    res.render('login', { layout: 'sub', title: 'Sign In', mode: 'login', error: 'Login failed' });
   }
 });
 
@@ -136,12 +139,12 @@ app.post('/signup', async (req, res) => {
     });
     const data = await apiRes.json();
     if (!apiRes.ok) {
-      return res.render('login', { title: 'Create Account', mode: 'signup', error: data.error });
+      return res.render('login', { layout: 'sub', title: 'Create Account', mode: 'signup', error: data.error });
     }
     res.cookie('token', data.token, { httpOnly: true, maxAge: config.platform.sessionExpiryHours * 3600000 });
     res.redirect('/portal/dashboard');
   } catch {
-    res.render('login', { title: 'Create Account', mode: 'signup', error: 'Signup failed' });
+    res.render('login', { layout: 'sub', title: 'Create Account', mode: 'signup', error: 'Signup failed' });
   }
 });
 
@@ -160,11 +163,11 @@ app.get('/logout', async (req, res) => {
 });
 
 app.get('/login', (_req, res) => {
-  res.render('login', { title: 'Sign In', mode: 'login', error: null });
+  res.render('login', { layout: 'sub', title: 'Sign In', mode: 'login', error: null });
 });
 
 app.get('/signup', (_req, res) => {
-  res.render('login', { title: 'Create Account', mode: 'signup', error: null });
+  res.render('login', { layout: 'sub', title: 'Create Account', mode: 'signup', error: null });
 });
 
 app.get('/portal/dashboard', async (req, res) => {
@@ -179,7 +182,7 @@ app.get('/portal/dashboard', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { stats: { domains: 0, credentials: 0, messagesSent: 0 }, recentMessages: [] };
-    res.render('dashboard', { ...data, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token });
+    res.render('dashboard', { layout: 'application', ...data, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -195,7 +198,7 @@ app.get('/portal/domains', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { domains: [] };
-    res.render('domains', { ...data, title: 'Domains', active: 'domains', email: userData.user?.email || '', token });
+    res.render('domains', { layout: 'application', ...data, title: 'Domains', active: 'domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -211,7 +214,7 @@ app.get('/portal/credentials', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { credentials: [] };
-    res.render('credentials', { ...data, title: 'Credentials', active: 'credentials', email: userData.user?.email || '', token });
+    res.render('credentials', { layout: 'application', ...data, title: 'Credentials', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -228,7 +231,7 @@ app.get('/portal/messages', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
-    res.render('messages', { ...data, title: 'Messages', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+    res.render('messages', { layout: 'application', ...data, title: 'Messages', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
   } catch { res.redirect('/login'); }
 });
 
@@ -245,7 +248,7 @@ app.get('/portal/messages/:id', async (req, res) => {
     const userData = await userRes.json();
     if (!msgRes.ok) return res.redirect('/portal/messages');
     const data = await msgRes.json();
-    res.render('message-detail', { msg: data.message, title: 'Message', active: 'messages', email: userData.user?.email || '', token });
+    res.render('message-detail', { layout: 'application', msg: data.message, title: 'Message', active: 'messages', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -261,7 +264,7 @@ app.get('/portal/settings', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { organization: {}, members: [] };
-    res.render('settings', { org: data.organization, members: data.members, title: 'Settings', active: 'settings', email: userData.user?.email || '', token });
+    res.render('settings', { layout: 'application', org: data.organization, members: data.members, title: 'Settings', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 

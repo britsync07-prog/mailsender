@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" class="main">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mailcouse — <%= title %></title>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/postal.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.css">
+</head>
+<body>
+  <header class="siteHeader">
+    <div class="siteHeader__inside">
+      <div class="siteHeader__logo"><a href="/portal/dashboard">Mailcouse</a></div>
+      <div class="siteHeader__version">v1.0</div>
+      <div class="siteHeader__nav">
+        <div class="siteHeader__navItem">
+          <a href="/portal/dashboard" class="sideHeader__navItemLink">Dashboard</a>
+        </div>
+        <div class="siteHeader__navItem siteHeader__navItem--user">
+          <span class="siteHeader__navLinkWithMenu"><%= email %></span>
+          <div class="siteHeader__subMenu">
+            <div class="siteHeader__subMenuItem siteHeader__subMenuItem--header"><%= email %></div>
+            <a href="/portal/settings" class="siteHeader__subMenuLink">Settings</a>
+            <a href="/logout" class="siteHeader__subMenuLink">Sign out</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="siteContent">
+    <nav class="sidebar">
+      <div class="sidebar__search">
+        <input type="text" class="sidebar__searchInput" placeholder="Search servers or pages...">
+      </div>
+      <div class="sidebarServerList">
+        <a href="/portal/dashboard" class="sidebarServerList__item <%= active === 'dashboard' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Dashboard</div>
+          <div class="sidebarServerList__meta">
+            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> Overview</span>
+          </div>
+        </a>
+        <a href="/portal/domains" class="sidebarServerList__item <%= active === 'domains' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Domains</div>
+          <div class="sidebarServerList__meta">
+            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> Sending</span>
+          </div>
+        </a>
+        <a href="/portal/credentials" class="sidebarServerList__item <%= active === 'credentials' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Credentials</div>
+          <div class="sidebarServerList__meta">
+            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> SMTP</span>
+          </div>
+        </a>
+        <a href="/portal/messages" class="sidebarServerList__item <%= active === 'messages' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Messages</div>
+          <div class="sidebarServerList__meta">
+            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> Logs</span>
+          </div>
+        </a>
+        <a href="/portal/settings" class="sidebarServerList__item <%= active === 'settings' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Settings</div>
+          <div class="sidebarServerList__meta">
+            <span><span class="sidebarServerList__status sidebarServerList__status--dev"></span> Config</span>
+          </div>
+        </a>
+      </div>
+      <div class="sidebar__new">
+        <a href="/portal/domains" class="u-link">+ Add new domain</a>
+      </div>
+    </nav>
+    <main class="siteContent__main">
+      <%- body %>
+    </main>
+  </div>
+
+  <script src="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.js"></script>
+  <script>
+    document.querySelectorAll('[data-chart]').forEach(function(el) {
+      try {
+        var data = JSON.parse(el.getAttribute('data-chart-data') || '{}');
+        var opts = JSON.parse(el.getAttribute('data-chart-options') || '{}');
+        new Chartist[el.getAttribute('data-chart')](el, data, opts);
+      } catch(e) { console.warn('Chart error:', e); }
+    });
+  </script>
+  <%- script %>
+</body>
+</html>
