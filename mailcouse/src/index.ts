@@ -9,6 +9,7 @@ import { initializeDatabase, closePool } from './db/connection';
 import apiRoutes from './api/routes';
 import healthRoutes from './api/health-routes';
 import adminRoutes from './api/admin-routes';
+import sendRoutes from './api/send-routes';
 import { formatDashboardHTML } from './monitoring/dashboard';
 import { getDashboardData } from './monitoring/dashboard';
 import { startCronRunner, stopCronRunner } from './cron/cron-runner';
@@ -53,6 +54,7 @@ const healthLimiter = rateLimit({
 app.use('/api/leads', apiLimiter, apiRoutes);
 app.use('/api/health', healthLimiter, healthRoutes);
 app.use('/api/admin', apiLimiter, adminRoutes);
+app.use('/api/send', apiLimiter, sendRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -66,6 +68,10 @@ app.get('/dashboard', async (_req, res) => {
   } catch (error) {
     res.status(500).type('html').send(`<h1>Dashboard Error</h1><pre>${error instanceof Error ? error.message : String(error)}</pre>`);
   }
+});
+
+app.get('/', (_req, res) => {
+  res.redirect('/dashboard');
 });
 
 app.get('/api/cron-jobs', (_req, res) => {
