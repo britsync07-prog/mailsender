@@ -272,6 +272,70 @@ app.get('/portal/settings', async (req, res) => {
 import { createSmtpRelay } from './smtp-relay';
 let smtpServer: any = null;
 
+app.get('/portal/routes', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/routes`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { routes: [] };
+    res.render('routes', { layout: 'application', ...data, title: 'Routes', active: 'routes', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/webhooks', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/webhooks`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { webhooks: [] };
+    res.render('webhooks', { layout: 'application', ...data, title: 'Webhooks', active: 'webhooks', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/track-domains', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/track-domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { trackDomains: [] };
+    res.render('track-domains', { layout: 'application', ...data, title: 'Tracking Domains', active: 'track-domains', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/pool', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/pool`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { pool: [] };
+    res.render('pool', { layout: 'application', ...data, title: 'Subdomain Pool', active: 'pool', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
 // ─── 404 ──────────────────────────────────────────────────
 
 app.use((_req, res) => {

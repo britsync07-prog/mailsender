@@ -1,62 +1,81 @@
 <div class="pageHeader">
-  <div class="pageHeader__title">Settings</div>
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious"><%= org.name %> &rarr;</span>
+    Settings
+  </h1>
 </div>
 
-<nav class="navBar">
+<nav class="navBar navBar--secondary">
   <ul>
     <li class="navBar__item"><a href="/portal/settings" class="navBar__link is-active">Settings</a></li>
   </ul>
 </nav>
 
-<div class="pageContent pageContent--sidebar">
-
-  <!-- Organization -->
-  <div class="tabular" style="margin-bottom:20px;">
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Organization</h3>
-    <table class="dataTable">
-      <tr><th style="width:140px;">Name</th><td><%= org.name %></td></tr>
-      <tr><th>ID</th><td class="mono"><%= org.id %></td></tr>
-      <tr><th>Created</th><td><%= org.created_at %></td></tr>
-    </table>
-  </div>
+<div class="pageContent pageContent--compact">
+  <form action="/api/portal/settings" method="POST" id="settings-form" onsubmit="return saveSettings(event)">
+    <fieldset class="fieldSet">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="org-name">Organization name</label>
+        <div class="fieldSet__input">
+          <input type="text" id="org-name" name="name" class="input input--text" value="<%= org.name %>" autofocus>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="time-zone">Time zone</label>
+        <div class="fieldSet__input">
+          <select id="time-zone" name="time_zone" class="input input--select">
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">Eastern Time (US &amp; Canada)</option>
+            <option value="America/Chicago">Central Time (US &amp; Canada)</option>
+            <option value="America/Denver">Mountain Time (US &amp; Canada)</option>
+            <option value="America/Los_Angeles">Pacific Time (US &amp; Canada)</option>
+            <option value="Europe/London">London</option>
+            <option value="Europe/Berlin">Berlin</option>
+            <option value="Asia/Tokyo">Tokyo</option>
+            <option value="Asia/Shanghai">Shanghai</option>
+          </select>
+          <p class="fieldSet__text">Choose the time zone that your organization exists within. This is used when displaying times in places where there isn't a logged in user to provide their own time zone.</p>
+        </div>
+      </div>
+    </fieldset>
+    <p class="fieldSetSubmit buttonSet">
+      <input type="submit" value="Save Settings" class="button button--positive js-form-submit">
+    </p>
+  </form>
 
   <!-- Team Members -->
-  <div class="tabular" style="margin-bottom:20px;">
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Team Members</h3>
+  <fieldset class="fieldSet" style="margin-top:40px;">
+    <div class="fieldSet__title" style="font-weight:600;font-size:16px;color:var(--blue);border-bottom:2px solid #e4e8ef;padding-bottom:5px;margin-bottom:20px;">Team Members</div>
     <table class="dataTable">
-      <thead>
-        <tr><td>Name</td><td>Email</td><td>Role</td></tr>
-      </thead>
+      <thead><tr><td>Name</td><td>Email</td><td>Role</td></tr></thead>
       <tbody>
         <% members.forEach(function(m) { %>
-          <tr>
-            <td><%= m.name %></td>
-            <td><%= m.email %></td>
-            <td><span class="label label--<%= m.role === 'owner' ? 'purple' : 'blue' %>"><%= m.role %></span></td>
-          </tr>
+          <tr><td><%= m.name %></td><td><%= m.email %></td><td><span class="label label--<%= m.role === 'owner' ? 'purple' : 'blue' %>"><%= m.role %></span></td></tr>
         <% }) %>
       </tbody>
     </table>
-  </div>
-
-  <!-- SMTP Configuration -->
-  <div class="tabular" style="margin-bottom:20px;">
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">SMTP Configuration</h3>
-    <p style="color:#666;font-size:13px;margin-bottom:15px;">Use these settings in your email client or application:</p>
-    <table class="dataTable">
-      <tr><th style="width:140px;">Server</th><td><code>live.noblecircle.online</code></td></tr>
-      <tr><th>Port</th><td><code>587</code> (STARTTLS) / <code>25</code> (plain)</td></tr>
-      <tr><th>Authentication</th><td>PLAIN / LOGIN</td></tr>
-      <tr><th>Encryption</th><td>STARTTLS</td></tr>
-      <tr><th>Username</th><td>Your SMTP credential username</td></tr>
-      <tr><th>Password</th><td>Your SMTP credential password</td></tr>
-    </table>
-  </div>
+  </fieldset>
 
   <!-- Danger Zone -->
-  <div class="dangerZone">
+  <div class="dangerZone" style="margin-top:40px;">
     <div class="dangerZone__title">Danger Zone</div>
     <div class="dangerZone__text">Transferring organization ownership or deleting the organization cannot be undone.</div>
   </div>
-
 </div>
+
+<script>
+async function saveSettings(e) {
+  e.preventDefault();
+  var name = document.getElementById('org-name').value;
+  var btn = e.target.querySelector('.js-form-submit');
+  btn.value = 'Saving...'; btn.disabled = true;
+  try {
+    var r = await fetch('/api/portal/settings', { method: 'PUT',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify({ name: name })
+    });
+    if (r.ok) { btn.value = 'Saved!'; setTimeout(function(){ btn.value='Save Settings'; btn.disabled=false; }, 2000); }
+    else { btn.value = 'Error'; btn.disabled = false; }
+  } catch(e) { btn.value = 'Error'; btn.disabled = false; }
+}
+</script>

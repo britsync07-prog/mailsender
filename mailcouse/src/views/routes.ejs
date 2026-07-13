@@ -1,0 +1,139 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Server &rarr;</span>
+    Routes
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link is-active">Routes</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <% if (!routes || routes.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">No routes have been configured for this server.</h2>
+      <p class="noData__text">
+        To receive incoming mail, you need to add routes to where we should send
+        messages we receive for your domain. You can send incoming e-mail to
+        HTTP endpoints, other SMTP servers or e-mail addresses.
+      </p>
+      <p class="noData__button buttonSet buttonSet--center">
+        <a href="javascript:showAddRoute()" class="button button--positive">Add a HTTP endpoint</a>
+        <a href="javascript:showAddRoute()" class="button button--positive">Add a SMTP endpoint</a>
+        <a href="javascript:showAddRoute()" class="button button--positive">Add an address endpoint</a>
+      </p>
+      <p class="noData__postButtonText">
+        Once you've added these, you'll be able to come back here to route a
+        specific e-mail address to your newly created endpoint. You can
+        <a href="javascript:showAddRoute()" class="u-link">add a route without an endpoint</a> if you really want.
+      </p>
+    </div>
+  <% } else { %>
+    <p class="pageContent__intro u-margin">
+      Routes control where incoming mail for your domain is sent. Messages can be sent to
+      HTTP endpoints, other SMTP servers or e-mail addresses.
+    </p>
+    <p class="u-margin pageContent__helpLink"><a href="#">Read more about receiving e-mails</a></p>
+
+    <ul class="routeList u-margin">
+      <% routes.forEach(function(r) { %>
+        <li class="routeList__item">
+          <a href="javascript:editRoute('<%= r.id %>')" class="routeList__link">
+            <p class="routeList__name"><%= r.name || r.match_type + ': ' + r.match_value %></p>
+            <div class="routeList__details">
+              <p class="routeList__endpoint">
+                <% if (r.action_type === 'webhook') { %><%= r.action_value || 'HTTP Endpoint' %><% } else if (r.action_type === 'smtp') { %><%= r.action_value || 'SMTP Endpoint' %><% } else { %><%= r.action_type %><% } %>
+              </p>
+              <p class="routeList__spamMode"><%= r.spam_mode || 'Mark' %></p>
+            </div>
+          </a>
+        </li>
+      <% }) %>
+    </ul>
+
+    <p class="u-center"><a href="javascript:showAddRoute()" class="button button--positive">Add another route</a></p>
+  <% } %>
+</div>
+
+<div id="route-modal" class="modal" style="display:none">
+  <div class="modal__backdrop" onclick="hideAddRoute()"></div>
+  <div class="modal__content">
+    <div class="modal__header">Add Route</div>
+    <div class="modal__body">
+      <p>Configure where incoming mail for this server should be sent.</p>
+      <div class="formBlock">
+        <label>Name / Description</label>
+        <input type="text" id="new-route-name" class="input input--text" placeholder="Catch-all to webhook">
+      </div>
+      <div class="formBlock">
+        <label>Domain (optional)</label>
+        <input type="text" id="new-route-domain" class="input input--text" placeholder="example.com">
+      </div>
+      <div class="formBlock">
+        <label>Match Type</label>
+        <select id="new-route-match" class="input input--select">
+          <option value="catch_all">Catch All</option>
+          <option value="exact">Exact Match</option>
+          <option value="wildcard">Wildcard</option>
+        </select>
+      </div>
+      <div class="formBlock">
+        <label>Match Value</label>
+        <input type="text" id="new-route-value" class="input input--text" placeholder="user@example.com">
+      </div>
+      <div class="formBlock">
+        <label>Action Type</label>
+        <select id="new-route-action-type" class="input input--select">
+          <option value="webhook">HTTP Endpoint</option>
+          <option value="smtp">SMTP Endpoint</option>
+          <option value="accept">Accept</option>
+          <option value="hold">Hold</option>
+          <option value="bounce">Bounce</option>
+          <option value="reject">Reject</option>
+        </select>
+      </div>
+      <div class="formBlock">
+        <label>Action Value</label>
+        <input type="text" id="new-route-action-value" class="input input--text" placeholder="https://hooks.example.com/email">
+      </div>
+    </div>
+    <div class="modal__footer">
+      <button class="button button--neutral" onclick="hideAddRoute()">Cancel</button>
+      <button class="button button--positive" id="add-route-btn" onclick="addRoute()">Add Route</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showAddRoute() { document.getElementById('route-modal').style.display = 'flex'; }
+function hideAddRoute() { document.getElementById('route-modal').style.display = 'none'; }
+async function addRoute() {
+  var body = {
+    name: document.getElementById('new-route-name').value.trim(),
+    domain: document.getElementById('new-route-domain').value.trim() || null,
+    matchType: document.getElementById('new-route-match').value,
+    matchValue: document.getElementById('new-route-value').value.trim(),
+    actionType: document.getElementById('new-route-action-type').value,
+    actionValue: document.getElementById('new-route-action-value').value.trim(),
+  };
+  var btn = document.getElementById('add-route-btn');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    var r = await fetch('/api/portal/routes', { method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify(body)
+    });
+    if (r.ok) location.reload();
+    else { var d = await r.json(); alert(d.error); btn.disabled = false; btn.textContent = 'Add Route'; }
+  } catch(e) { alert('Error: '+e.message); btn.disabled = false; btn.textContent = 'Add Route'; }
+}
+async function deleteRoute(id) {
+  if (!confirm('Delete this route?')) return;
+  await fetch('/api/portal/routes/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
+  location.reload();
+}
+function editRoute(id) { deleteRoute(id); }
+</script>

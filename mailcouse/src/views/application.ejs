@@ -9,23 +9,15 @@
   <link rel="stylesheet" href="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.css">
 </head>
 <body>
-  <header class="siteHeader">
+  <header class="siteHeader" data-turbolinks-permanent>
     <div class="siteHeader__inside">
       <div class="siteHeader__logo"><a href="/portal/dashboard">Mailcouse</a></div>
       <div class="siteHeader__version">v1.0</div>
-      <div class="siteHeader__nav">
-        <div class="siteHeader__navItem">
-          <a href="/portal/dashboard" class="sideHeader__navItemLink">Dashboard</a>
-        </div>
-        <div class="siteHeader__navItem siteHeader__navItem--user">
-          <span class="siteHeader__navLinkWithMenu"><%= email %></span>
-          <div class="siteHeader__subMenu">
-            <div class="siteHeader__subMenuItem siteHeader__subMenuItem--header"><%= email %></div>
-            <a href="/portal/settings" class="siteHeader__subMenuLink">Settings</a>
-            <a href="/logout" class="siteHeader__subMenuLink">Sign out</a>
-          </div>
-        </div>
-      </div>
+      <ul class="siteHeader__nav">
+        <li class="siteHeader__navItem siteHeader__navItem--user"><%= email %></li>
+        <li class="siteHeader__navItem"><a href="/portal/settings" class="sideHeader__navItemLink">My Settings</a></li>
+        <li class="siteHeader__navItem"><a href="/logout" class="sideHeader__navItemLink">Logout</a></li>
+      </ul>
     </div>
   </header>
 
@@ -38,31 +30,49 @@
         <a href="/portal/dashboard" class="sidebarServerList__item <%= active === 'dashboard' ? 'is-active' : '' %>">
           <div class="sidebarServerList__name">Dashboard</div>
           <div class="sidebarServerList__meta">
-            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> Overview</span>
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-live">Live</span></span>
           </div>
         </a>
         <a href="/portal/domains" class="sidebarServerList__item <%= active === 'domains' ? 'is-active' : '' %>">
           <div class="sidebarServerList__name">Domains</div>
           <div class="sidebarServerList__meta">
-            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> Sending</span>
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-live">Live</span></span>
           </div>
         </a>
         <a href="/portal/credentials" class="sidebarServerList__item <%= active === 'credentials' ? 'is-active' : '' %>">
           <div class="sidebarServerList__name">Credentials</div>
           <div class="sidebarServerList__meta">
-            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> SMTP</span>
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-live">Live</span></span>
           </div>
         </a>
         <a href="/portal/messages" class="sidebarServerList__item <%= active === 'messages' ? 'is-active' : '' %>">
           <div class="sidebarServerList__name">Messages</div>
           <div class="sidebarServerList__meta">
-            <span><span class="sidebarServerList__status sidebarServerList__status--live"></span> Logs</span>
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-live">Live</span></span>
           </div>
         </a>
-        <a href="/portal/settings" class="sidebarServerList__item <%= active === 'settings' ? 'is-active' : '' %>">
-          <div class="sidebarServerList__name">Settings</div>
+        <a href="/portal/routes" class="sidebarServerList__item <%= active === 'routes' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Routes</div>
           <div class="sidebarServerList__meta">
-            <span><span class="sidebarServerList__status sidebarServerList__status--dev"></span> Config</span>
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-development">Dev</span></span>
+          </div>
+        </a>
+        <a href="/portal/webhooks" class="sidebarServerList__item <%= active === 'webhooks' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Webhooks</div>
+          <div class="sidebarServerList__meta">
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-development">Dev</span></span>
+          </div>
+        </a>
+        <a href="/portal/track-domains" class="sidebarServerList__item <%= active === 'track-domains' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Track Domains</div>
+          <div class="sidebarServerList__meta">
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-development">Dev</span></span>
+          </div>
+        </a>
+        <a href="/portal/pool" class="sidebarServerList__item <%= active === 'pool' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Pool</div>
+          <div class="sidebarServerList__meta">
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-development">Dev</span></span>
           </div>
         </a>
       </div>
@@ -70,9 +80,16 @@
         <a href="/portal/domains" class="u-link">+ Add new domain</a>
       </div>
     </nav>
-    <main class="siteContent__main">
+    <section class="siteContent__main">
       <%- body %>
-    </main>
+      <footer class="siteContent__footer">
+        <ul class="footer__links">
+          <li class="footer__name">Powered by Mailcouse v1.0</li>
+          <li><a href="https://docs.postalserver.io" target="_blank">Documentation</a></li>
+          <li><a href="https://discussions.postalserver.io" target="_blank">Ask for help</a></li>
+        </ul>
+      </footer>
+    </section>
   </div>
 
   <script src="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.js"></script>

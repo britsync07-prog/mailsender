@@ -1,0 +1,98 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Server &rarr;</span>
+    Webhooks
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link is-active">Manage Webhooks</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <% if (!webhooks || webhooks.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">No webhooks have been configured for this server.</h2>
+      <p class="noData__text">
+        You haven't added any webhooks for this server yet. A webhook enables your web
+        application to be notified when certain events occur in the lifecycle of the mail server.
+      </p>
+      <p class="noData__button"><a href="javascript:showAddWebhook()" class="button button--positive">Add your first webhook</a></p>
+    </div>
+  <% } else { %>
+    <ul class="webhookList u-margin">
+      <% webhooks.forEach(function(w) { %>
+        <li class="webhookList__item">
+          <div class="webhookList__top">
+            <p class="webhookList__name"><a href="javascript:editWebhook('<%= w.id %>')"><%= w.name || w.endpoint_url %></a></p>
+            <p class="webhookList__labels">
+              <% if (w.enabled !== false) { %><span class="label label--green">Enabled</span><% } else { %><span class="label label--red">Disabled</span><% } %>
+            </p>
+          </div>
+          <div class="webhookList__bottom">
+            <p class="webhookList__usageTime">
+              <% if (w.last_used_at) { %>Last sent request <%= w.last_used_at %><% } else { %>Not used yet.<% } %>
+            </p>
+            <ul class="webhookList__links">
+              <li class="webhookList__link"><a href="javascript:deleteWebhook('<%= w.id %>')">Delete</a></li>
+            </ul>
+          </div>
+        </li>
+      <% }) %>
+    </ul>
+
+    <p class="u-center"><a href="javascript:showAddWebhook()" class="button button--positive">Add another webhook</a></p>
+  <% } %>
+</div>
+
+<div id="webhook-modal" class="modal" style="display:none">
+  <div class="modal__backdrop" onclick="hideAddWebhook()"></div>
+  <div class="modal__content">
+    <div class="modal__header">Add Webhook</div>
+    <div class="modal__body">
+      <p>Configure a webhook endpoint to receive event notifications.</p>
+      <div class="formBlock">
+        <label>Name</label>
+        <input type="text" id="new-webhook-name" class="input input--text" placeholder="My Webhook">
+      </div>
+      <div class="formBlock">
+        <label>Endpoint URL</label>
+        <input type="url" id="new-webhook-url" class="input input--text" placeholder="https://hooks.example.com/notify">
+      </div>
+    </div>
+    <div class="modal__footer">
+      <button class="button button--neutral" onclick="hideAddWebhook()">Cancel</button>
+      <button class="button button--positive" id="add-webhook-btn" onclick="addWebhook()">Add Webhook</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showAddWebhook() { document.getElementById('webhook-modal').style.display = 'flex'; }
+function hideAddWebhook() { document.getElementById('webhook-modal').style.display = 'none'; }
+async function addWebhook() {
+  var body = {
+    name: document.getElementById('new-webhook-name').value.trim(),
+    endpointUrl: document.getElementById('new-webhook-url').value.trim(),
+  };
+  if (!body.endpointUrl) return alert('Enter an endpoint URL');
+  var btn = document.getElementById('add-webhook-btn');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    var r = await fetch('/api/portal/webhooks', { method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify(body)
+    });
+    if (r.ok) location.reload();
+    else { var d = await r.json(); alert(d.error); btn.disabled = false; btn.textContent = 'Add Webhook'; }
+  } catch(e) { alert('Error: '+e.message); btn.disabled = false; btn.textContent = 'Add Webhook'; }
+}
+async function deleteWebhook(id) {
+  if (!confirm('Delete this webhook?')) return;
+  await fetch('/api/portal/webhooks/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
+  location.reload();
+}
+function editWebhook(id) { deleteWebhook(id); }
+</script>

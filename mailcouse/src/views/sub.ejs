@@ -8,11 +8,8 @@
   <link rel="stylesheet" href="/css/postal.css">
 </head>
 <body>
-  <div class="subPageBox<% if (typeof wide !== 'undefined' && wide) { %> subPageBox--wide<% } %>">
-    <div class="subPageBox__title"><%= title %></div>
-    <div class="subPageBox__content">
-      <%- body %>
-    </div>
+  <div class="subPageBox<%= typeof wide !== 'undefined' && wide ? ' subPageBox--wide' : '' %>">
+    <%- body %>
   </div>
 </body>
 </html>

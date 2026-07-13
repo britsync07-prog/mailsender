@@ -1,39 +1,107 @@
 <div class="pageHeader">
-  <div class="pageHeader__title">Message</div>
+  <div class="pageHeader__title">Message #<%= msg.id.substring(0,8) %></div>
 </div>
 
-<nav class="navBar">
+<nav class="navBar navBar--secondary">
   <ul>
     <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
     <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>" class="navBar__link is-active">#<%= msg.id.substring(0,8) %></a></li>
   </ul>
 </nav>
 
-<div class="pageContent pageContent--sidebar">
-
-  <div class="tabular">
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Details</h3>
-    <table class="dataTable">
-      <tr><th style="width:140px;">ID</th><td class="mono"><%= msg.id %></td></tr>
-      <tr><th>From</th><td><%= msg.mail_from %></td></tr>
-      <tr><th>To</th><td><%= msg.rcpt_to %></td></tr>
-      <tr><th>Subject</th><td><%= msg.subject || '(none)' %></td></tr>
-      <tr><th>Status</th><td><span class="label label--<%= msg.status === 'sent' ? 'green' : msg.status === 'bounced' ? 'red' : 'orange' %>"><%= msg.status %></span></td></tr>
-      <tr><th>Bounce</th><td><%= msg.bounce || '—' %></td></tr>
-      <tr><th>Size</th><td><%= msg.size ? (msg.size/1024).toFixed(1) + ' KB' : '—' %></td></tr>
-      <tr><th>Credential</th><td><%= msg.credential_name || '—' %></td></tr>
-      <tr><th>Domain</th><td><%= msg.domain_name || '—' %></td></tr>
-      <tr><th>Subdomain</th><td><span class="mono"><%= msg.subdomain || '—' %></span></td></tr>
-      <tr><th>Created</th><td><%= msg.created_at %></td></tr>
-      <tr><th>Sent At</th><td><%= msg.sent_at || '—' %></td></tr>
-    </table>
+<div class="messageHeader">
+  <div class="messageHeader__header messageHeader__header--outgoing">
+    <p class="messageHeader__status"><span class="label label--messageStatus-<%= msg.status %>"><%= msg.status %></span></p>
+    <h2 class="messageHeader__subject"><%= msg.subject || 'No subject' %></h2>
+    <div class="messageHeader__basicProperties">
+      <dl><dt>From</dt><dd><%= msg.mail_from %></dd></dl>
+      <dl><dt>To</dt><dd><%= msg.rcpt_to %></dd></dl>
+      <dl><dt>Received</dt><dd><%= msg.created_at %></dd></dl>
+    </div>
   </div>
+</div>
 
-  <% if (msg.raw_headers) { %>
-  <div class="tabular" style="margin-top:20px;">
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Raw Headers</h3>
-    <pre class="mono" style="background:#f5f5f5;padding:12px;border-radius:3px;font-size:12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;"><%= msg.raw_headers %></pre>
-  </div>
+<nav class="navBar navBar--tertiary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>" class="navBar__link is-active">Properties</a></li>
+    <% if (msg.raw_headers) { %><li class="navBar__item"><a href="/portal/messages/<%= msg.id %>?tab=headers" class="navBar__link">Headers</a></li><% } %>
+    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>?tab=plain" class="navBar__link">Plain Text</a></li>
+    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>?tab=html" class="navBar__link">HTML</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent">
+  <% var tab = typeof query !== 'undefined' ? query.tab : 'properties'; %>
+  <% tab = typeof tabParam !== 'undefined' ? tabParam : (typeof tab !== 'undefined' ? tab : 'properties'); %>
+
+  <% if (tab === 'headers' && msg.raw_headers) { %>
+    <div class="tabular">
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Raw Headers</h3>
+      <pre class="mono" style="background:#f5f5f5;padding:12px;border-radius:3px;font-size:12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;"><%= msg.raw_headers %></pre>
+    </div>
+  <% } else if (tab === 'plain') { %>
+    <div class="tabular">
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Plain Text</h3>
+      <pre class="mono" style="background:#f5f5f5;padding:12px;border-radius:3px;font-size:12px;white-space:pre-wrap;"><%= msg.body_text || '(no plain text content)' %></pre>
+    </div>
+  <% } else if (tab === 'html') { %>
+    <div class="tabular">
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">HTML</h3>
+      <iframe srcdoc="<%= msg.body_html ? msg.body_html.replace(/"/g,'&quot;') : '' %>" style="width:100%;height:500px;border:1px solid #ddd;border-radius:3px;background:#fff;"></iframe>
+    </div>
+  <% } else { %>
+    <div class="messagePropertiesPage">
+      <div class="messagePropertiesPage__left">
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>Spam Status</dt>
+            <dd><span class="label label--large label--spamStatus-not_checked">Not checked</span></dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Tag</dt>
+            <dd>Not tagged</dd>
+          </dl>
+        </div>
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>Raw Message</dt>
+            <dd><%= msg.raw_headers ? 'Available' : 'Removed' %></dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Message Size</dt>
+            <dd><%= msg.size ? (msg.size/1024).toFixed(1) + ' KB' : 'n/a' %></dd>
+          </dl>
+        </div>
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>Credential</dt>
+            <dd><%= msg.credential_name || 'Unknown Credential' %></dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Domain</dt>
+            <dd><%= msg.domain_name || 'Unknown Domain' %></dd>
+          </dl>
+        </div>
+        <dl class="messagePropertiesPage__property">
+          <dt>Message ID</dt>
+          <dd><%= msg.message_id || 'No message ID' %></dd>
+        </dl>
+      </div>
+      <div class="messagePropertiesPage__right">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:15px;">Deliveries</h3>
+        <ul class="deliveryList">
+          <li class="deliveryList__item">
+            <div class="deliveryList__top">
+              <div class="deliveryList__time"><%= msg.created_at %></div>
+              <div class="deliveryList__status">
+                <span class="label label--large label--messageStatus-<%= msg.status %>"><%= msg.status %></span>
+              </div>
+            </div>
+            <% if (msg.bounce) { %><p class="deliveryList__error"><%= msg.bounce %></p><% } %>
+            <div class="deliveryList__error deliveryList__error--output"><%= msg.mail_from %> &rarr; <%= msg.rcpt_to %></div>
+          </li>
+        </ul>
+      </div>
+    </div>
   <% } %>
-
 </div>

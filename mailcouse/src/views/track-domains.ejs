@@ -1,0 +1,91 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Server &rarr;</span>
+    Tracking Domains
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/track-domains" class="navBar__link is-active">Tracking Domains</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <% if (!trackDomains || trackDomains.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">There are no tracking domains for this server.</h2>
+      <p class="noData__text">
+        To use open &amp; click tracking, you need to configure a domain that links will be re-written to use. Enable
+        message tracking by adding a suitable tracking domain for your outbound e-mails.
+      </p>
+      <p class="noData__button"><a href="javascript:showAddTrackDomain()" class="button button--positive">Add a custom tracking domain</a></p>
+    </div>
+  <% } else { %>
+    <ul class="domainList u-margin">
+      <% trackDomains.forEach(function(td) { %>
+        <li class="domainList__item">
+          <div class="domainList__details">
+            <p class="domainList__name">
+              <a href="javascript:void(0)"><%= td.domain %></a>
+              <% if (td.dns_status === 'OK') { %><span class="label label--green">OK</span><% } else { %><span class="label label--orange">Pending</span><% } %>
+            </p>
+            <ul class="domainList__checks">
+              <% if (td.ssl_enabled) { %><li class="domainList__check domainList__check--neutral">SSL enabled</li><% } else { %><li class="domainList__check domainList__check--neutral-cross">SSL disabled</li><% } %>
+              <% if (td.dns_status === 'OK') { %><li class="domainList__check domainList__check--ok">CNAME configured correctly</li><% } else if (td.dns_status) { %><li class="domainList__check domainList__check--warning" title="<%= td.dns_error %>">CNAME not configured correctly</li><% } else { %><li class="domainList__check domainList__check--neutral-cross">CNAME/DNS not checked yet</li><% } %>
+            </ul>
+          </div>
+          <ul class="domainList__properties">
+            <li class="domainList__links">
+              <a href="javascript:deleteTrackDomain('<%= td.id %>')" class="domainList__delete">Delete</a>
+            </li>
+          </ul>
+        </li>
+      <% }) %>
+    </ul>
+
+    <p class="u-center"><a href="javascript:showAddTrackDomain()" class="button button--positive">Add new track domain</a></p>
+  <% } %>
+</div>
+
+<div id="track-domain-modal" class="modal" style="display:none">
+  <div class="modal__backdrop" onclick="hideAddTrackDomain()"></div>
+  <div class="modal__content">
+    <div class="modal__header">Add Tracking Domain</div>
+    <div class="modal__body">
+      <p>Enter the domain you want to use for open and click tracking.</p>
+      <div class="formBlock">
+        <label>Domain</label>
+        <input type="text" id="new-track-domain" class="input input--text" placeholder="track.example.com">
+      </div>
+    </div>
+    <div class="modal__footer">
+      <button class="button button--neutral" onclick="hideAddTrackDomain()">Cancel</button>
+      <button class="button button--positive" id="add-track-domain-btn" onclick="addTrackDomain()">Add Domain</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showAddTrackDomain() { document.getElementById('track-domain-modal').style.display = 'flex'; }
+function hideAddTrackDomain() { document.getElementById('track-domain-modal').style.display = 'none'; }
+async function addTrackDomain() {
+  var d = document.getElementById('new-track-domain').value.trim();
+  if (!d) return alert('Enter a domain name');
+  var btn = document.getElementById('add-track-domain-btn');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    var r = await fetch('/api/portal/track-domains', { method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify({ domain: d })
+    });
+    if (r.ok) location.reload();
+    else { var data = await r.json(); alert(data.error); btn.disabled = false; btn.textContent = 'Add Domain'; }
+  } catch(e) { alert('Error: '+e.message); btn.disabled = false; btn.textContent = 'Add Domain'; }
+}
+async function deleteTrackDomain(id) {
+  if (!confirm('Delete this tracking domain?')) return;
+  await fetch('/api/portal/track-domains/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
+  location.reload();
+}
+</script>

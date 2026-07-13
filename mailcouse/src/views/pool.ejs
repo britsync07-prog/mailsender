@@ -1,0 +1,45 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Server &rarr;</span>
+    Subdomain Pool
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/pool" class="navBar__link is-active">Subdomain Pool</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <% if (!pool || pool.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">There are no subdomains in the pool.</h2>
+      <p class="noData__text">
+        The subdomain pool provides a set of subdomains that outgoing messages are sent from.
+        This helps distribute reputation across multiple sending identities.
+      </p>
+    </div>
+  <% } else { %>
+    <p class="pageContent__intro u-margin">
+      Subdomains are the sending identities that your outgoing messages are sent from. The pool tracks usage, engagement, and daily limits.
+    </p>
+
+    <ul class="largeList u-margin">
+      <% pool.forEach(function(p) { %>
+        <li class="largeList__item">
+          <a href="javascript:void(0)" class="largeList__link">
+            <%= p.subdomain %>.<%= p.root_domain %>
+            <% if (p.status) { %><span class="largeList__rightLabel"><span class="label label--<%= p.status === 'active' ? 'green' : 'orange' %>"><%= p.status %></span></span><% } %>
+            <div class="largeList__subText">
+              Sent today: <%= p.emails_sent_today || 0 %> / <%= p.daily_limit || 300 %> &middot;
+              Total sent: <%= p.total_sent || 0 %> &middot;
+              Engagement: <%= p.engagement_score ? (p.engagement_score * 100).toFixed(1) + '%' : 'N/A' %>
+              <% if (p.sender_name) { %> &middot; Sender: <%= p.sender_name %><% } %>
+            </div>
+          </a>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</div>

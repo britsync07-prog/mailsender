@@ -2,89 +2,97 @@
   <div class="pageHeader__title">Messages</div>
 </div>
 
-<nav class="navBar">
+<nav class="navBar navBar--secondary">
   <ul>
-    <li class="navBar__item"><a href="/portal/messages" class="navBar__link is-active">Messages</a></li>
-    <li class="navBar__item"><a href="/portal/messages?status=sent" class="navBar__link">Sent</a></li>
-    <li class="navBar__item"><a href="/portal/messages?status=bounced" class="navBar__link">Bounced</a></li>
-    <li class="navBar__item"><a href="/portal/messages?status=failed" class="navBar__link">Failed</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link is-active">Outgoing Messages</a></li>
   </ul>
 </nav>
 
-<div class="pageContent pageContent--sidebar">
-
-  <!-- Search -->
+<div class="pageContent js-ajax-region">
   <div class="messageSearch">
-    <div class="messageSearch__row">
-      <div class="messageSearch__field">
-        <label>Search</label>
-        <input type="text" id="search" placeholder="Email or subject..." value="<%= search %>">
+    <a href="javascript:toggleHelp()" class="messageSearch__help js-toggle-helpbox">Need help searching?</a>
+    <input type="text" class="messageSearch__input js-focus-on-f" placeholder="Search messages..." id="message-search-input" value="<%= search %>" onkeydown="if(event.key==='Enter')searchMessages()">
+    <div class="messageSearch__helpBox is-hidden js-helpbox" id="search-help" style="display:none">
+      <div class="messageSearch__left">
+        <h3 class="messageSearch__helpBoxTitle">Searching messages</h3>
+        <p class="messageSearch__helpBoxText">You can use the following keywords to narrow down your search results:</p>
       </div>
-      <div class="messageSearch__field">
-        <label>Status</label>
-        <select id="status-filter">
-          <option value="">All</option>
-          <option value="sent" <%= status === 'sent' ? 'selected' : '' %>>Sent</option>
-          <option value="bounced" <%= status === 'bounced' ? 'selected' : '' %>>Bounced</option>
-          <option value="failed" <%= status === 'failed' ? 'selected' : '' %>>Failed</option>
-          <option value="pending" <%= status === 'pending' ? 'selected' : '' %>>Pending</option>
-        </select>
-      </div>
-      <div class="messageSearch__field" style="flex:0;">
-        <label>&nbsp;</label>
-        <button class="button" onclick="searchMessages()">Search</button>
+      <div class="messageSearch__right">
+        <dl class="messageSearch__definition">
+          <dt>to:<em>email</em></dt>
+          <dd>Search for messages sent to a specific address</dd>
+        </dl>
+        <dl class="messageSearch__definition">
+          <dt>from:<em>email</em></dt>
+          <dd>Search for messages sent from a specific address</dd>
+        </dl>
+        <dl class="messageSearch__definition">
+          <dt>subject:<em>text</em></dt>
+          <dd>Search for messages with a specific word in the subject</dd>
+        </dl>
       </div>
     </div>
   </div>
 
-  <!-- Message List -->
-  <div class="messageList">
-    <% if (messages.length === 0) { %>
-      <div class="noData">
-        <div class="noData__title">No messages found</div>
-        <div class="noData__text">Try changing your search or filter.</div>
+  <% if (messages.length === 0) { %>
+    <% if (search || status) { %>
+      <div class="noData noData--clean">
+        <h2 class="noData__title">No messages found matching your filter.</h2>
+        <p class="noData__text">There were no messages which matched the query that you entered. Sorry about that.</p>
+      </div>
+    <% } else { %>
+      <div class="pageContent--compact">
+        <div class="noData noData--clean">
+          <h2 class="noData__title">No messages have been sent yet.</h2>
+          <p class="noData__text">You haven't sent any messages through this mail server yet. Not to worry though — they'll start appearing here as soon as you start sending them.</p>
+        </div>
       </div>
     <% } %>
-    <% messages.forEach(function(m) { %>
-      <div class="messageList__message">
-        <a href="/portal/messages/<%= m.id %>" class="messageList__link">
-          <div class="messageList__details">
-            <div class="messageList__subject"><%= m.subject || '(no subject)' %></div>
-            <dl class="messageList__addresses">
-              <dt>From:</dt><dd><%= m.mail_from %></dd>
-              <dt>To:</dt><dd><%= m.rcpt_to %></dd>
-            </dl>
-          </div>
-          <div class="messageList__meta">
-            <div class="messageList__timestamp"><%= m.created_at %></div>
-            <span class="label label--<%= m.status === 'sent' ? 'green' : m.status === 'bounced' ? 'red' : m.status === 'failed' ? 'red' : 'orange' %>"><%= m.status %></span>
-          </div>
-        </a>
-      </div>
-    <% }) %>
-  </div>
-
-  <!-- Pagination -->
-  <% if (pagination && pagination.totalPages > 1) { %>
-    <div class="simplePagination">
-      <span><%= pagination.total %> messages — Page <%= pagination.page %> of <%= pagination.totalPages %></span>
-      <div>
-        <% if (pagination.page > 1) { %>
-          <a href="?page=<%= pagination.page - 1 %><%= status ? '&status=' + status : '' %><%= search ? '&search=' + search : '' %>" class="button button--small button--neutral">Previous</a>
-        <% } %>
-        <% if (pagination.page < pagination.totalPages) { %>
-          <a href="?page=<%= pagination.page + 1 %><%= status ? '&status=' + status : '' %><%= search ? '&search=' + search : '' %>" class="button button--small">Next</a>
-        <% } %>
-      </div>
+  <% } else { %>
+    <div class="messageList">
+      <% messages.forEach(function(m) { %>
+        <div class="messageList__message">
+          <a href="/portal/messages/<%= m.id %>" class="messageList__link">
+            <div class="messageList__details messageList__details--outgoing">
+              <p class="messageList__subject"><%= m.subject || '(no subject)' %></p>
+              <dl class="messageList__addresses">
+                <dt>To:</dt><dd><%= m.rcpt_to %></dd>
+                <dt>From:</dt><dd><%= m.mail_from %></dd>
+              </dl>
+            </div>
+            <div class="messageList__meta">
+              <p class="messageList__timestamp"><%= m.created_at %></p>
+              <p class="messageList__status"><span class="label label--messageStatus-<%= m.status %>"><%= m.status %></span></p>
+            </div>
+          </a>
+        </div>
+      <% }) %>
     </div>
-  <% } %>
 
+    <% if (pagination && pagination.totalPages > 1) { %>
+      <div class="simplePagination">
+        <p class="simplePagination__previous">
+          <% if (pagination.page > 1) { %><a href="?page=<%= pagination.page - 1 %><%= status ? '&status=' + status : '' %><%= search ? '&search=' + search : '' %>" class="simplePagination__link">&larr; Previous</a><% } %>
+        </p>
+        <div class="simplePagination__current">
+          <p class="simplePagination__info"><%= pagination.total %> messages</p>
+          <p>Page <%= pagination.page %> of <%= pagination.totalPages %></p>
+        </div>
+        <p class="simplePagination__next">
+          <% if (pagination.page < pagination.totalPages) { %><a href="?page=<%= pagination.page + 1 %><%= status ? '&status=' + status : '' %><%= search ? '&search=' + search : '' %>" class="simplePagination__link">Next &rarr;</a><% } %>
+        </p>
+      </div>
+    <% } %>
+  <% } %>
 </div>
 
 <script>
+function toggleHelp() {
+  var h = document.getElementById('search-help');
+  h.style.display = h.style.display === 'none' ? 'flex' : 'none';
+}
 function searchMessages() {
-  var s = document.getElementById('search').value;
-  var st = document.getElementById('status-filter').value;
-  location.href = '/portal/messages?search=' + encodeURIComponent(s) + (st ? '&status=' + st : '');
+  var s = document.getElementById('message-search-input').value;
+  location.href = '/portal/messages?search=' + encodeURIComponent(s);
 }
 </script>
