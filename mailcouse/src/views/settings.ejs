@@ -1,0 +1,46 @@
+<div class="page-header">
+  <h2>Settings</h2>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Organization</h3></div>
+  <table class="table-details">
+    <tr><th>Name</th><td><%= org.name %></td></tr>
+    <tr><th>ID</th><td class="mono"><%= org.id %></td></tr>
+    <tr><th>Created</th><td><%= org.created_at %></td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Team Members</h3></div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% members.forEach(function(m) { %>
+        <tr>
+          <td><%= m.name %></td>
+          <td><%= m.email %></td>
+          <td><span class="badge badge-<%= m.role %>"><%= m.role %></span></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>SMTP Configuration</h3></div>
+  <p>Use these settings in your email client or application:</p>
+  <table class="table-details">
+    <tr><th>Server</th><td><code>live.noblecircle.online</code></td></tr>
+    <tr><th>Port</th><td><code>587</code> (STARTTLS) / <code>25</code> (plain)</td></tr>
+    <tr><th>Authentication</th><td>PLAIN / LOGIN</td></tr>
+    <tr><th>Username</th><td>Your SMTP credential username</td></tr>
+    <tr><th>Password</th><td>Your SMTP credential password</td></tr>
+  </table>
+</div>

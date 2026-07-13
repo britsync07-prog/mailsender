@@ -1,0 +1,113 @@
+<div class="page-header">
+  <h2>Domains</h2>
+  <button class="btn btn-primary" onclick="showAddDomain()">Add Domain</button>
+</div>
+
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Domain</th>
+        <th>Status</th>
+        <th>SPF</th>
+        <th>DKIM</th>
+        <th>MX</th>
+        <th>Outgoing</th>
+        <th>Added</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (domains.length === 0) { %>
+        <tr><td colspan="8" class="empty">No domains yet. Add your first domain!</td></tr>
+      <% } %>
+      <% domains.forEach(function(d) { %>
+        <tr>
+          <td><strong><%= d.domain %></strong></td>
+          <td>
+            <% if (d.verified) { %>
+              <span class="badge badge-verified">Verified</span>
+            <% } else { %>
+              <span class="badge badge-pending">Pending</span>
+            <% } %>
+          </td>
+          <td><span class="badge badge-<%= d.spf_status === 'ok' ? 'verified' : 'pending' %>"><%= d.spf_status || '—' %></span></td>
+          <td><span class="badge badge-<%= d.dkim_status === 'ok' ? 'verified' : 'pending' %>"><%= d.dkim_status || '—' %></span></td>
+          <td><span class="badge badge-<%= d.mx_status === 'ok' ? 'verified' : 'pending' %>"><%= d.mx_status || '—' %></span></td>
+          <td><%= d.outgoing ? 'Yes' : 'No' %></td>
+          <td><%= d.created_at %></td>
+          <td>
+            <button class="btn btn-sm" onclick="verifyDomain('<%= d.id %>')">Verify</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteDomain('<%= d.id %>')">Del</button>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<!-- Add Domain Modal -->
+<div id="domain-modal" class="modal" style="display:none">
+  <div class="modal-backdrop" onclick="hideAddDomain()"></div>
+  <div class="modal-content">
+    <h3>Add Domain</h3>
+    <p>Enter the domain you want to send email from.</p>
+    <div class="form-group">
+      <label>Domain</label>
+      <input type="text" id="new-domain" placeholder="example.com">
+    </div>
+    <div id="domain-dns-records" style="display:none">
+      <h4>DNS Records</h4>
+      <p>Add these DNS records to your domain provider:</p>
+      <pre id="dns-records-output"></pre>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="hideAddDomain()">Cancel</button>
+      <button class="btn btn-primary" id="add-domain-btn" onclick="addDomain()">Add Domain</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showAddDomain() { document.getElementById('domain-modal').style.display = 'flex'; }
+function hideAddDomain() { document.getElementById('domain-modal').style.display = 'none'; }
+
+async function addDomain() {
+  const domain = document.getElementById('new-domain').value.trim();
+  if (!domain) return alert('Enter a domain name');
+  const btn = document.getElementById('add-domain-btn');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    const res = await fetch('/api/portal/domains', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer <%= token %>' },
+      body: JSON.stringify({ domain })
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.error);
+    document.getElementById('dns-records-output').textContent =
+      `SPF: ${data.dnsRecords.spf}\nDKIM: ${data.dnsRecords.dkim}\nMX: ${data.dnsRecords.mx}`;
+    document.getElementById('domain-dns-records').style.display = 'block';
+    document.getElementById('new-domain').disabled = true;
+    btn.textContent = 'Close';
+    btn.onclick = () => location.reload();
+  } catch(e) { alert('Error: ' + e.message); btn.disabled = false; btn.textContent = 'Add Domain'; }
+}
+
+async function verifyDomain(id) {
+  const res = await fetch('/api/portal/domains/' + id + '/verify', {
+    headers: { 'Authorization': 'Bearer <%= token %>' }
+  });
+  const data = await res.json();
+  alert('Verification: ' + (data.verified ? 'ALL OK' : 'Some checks failed. Check records.') + '\n\n' +
+    'SPF: ' + data.checks.spf + '\nDKIM: ' + data.checks.dkim + '\nMX: ' + data.checks.mx + '\nDMARC: ' + data.checks.return_path);
+  location.reload();
+}
+
+async function deleteDomain(id) {
+  if (!confirm('Delete this domain?')) return;
+  await fetch('/api/portal/domains/' + id, { method: 'DELETE',
+    headers: { 'Authorization': 'Bearer <%= token %>' }
+  });
+  location.reload();
+}
+</script>

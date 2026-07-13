@@ -101,6 +101,14 @@ export const config = {
     jobTtlHours: 72,
   },
 
+  // Multi-tenant platform
+  platform: {
+    jwtSecret: process.env.JWT_SECRET || 'mailcouse-jwt-secret-change-in-production',
+    sessionExpiryHours: 72,
+    smtpPort: parseInt(process.env.SMTP_PORT || '587'),
+    smtpPortAlt: parseInt(process.env.SMTP_PORT_ALT || '25'),
+  },
+
   // Validation
   validation: {
     roleBasedPrefixes: [

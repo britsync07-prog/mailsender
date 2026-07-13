@@ -1,0 +1,47 @@
+<div class="page-header">
+  <h2>Dashboard</h2>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-value"><%= stats.domains %></div>
+    <div class="stat-label">Domains</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= stats.credentials %></div>
+    <div class="stat-label">SMTP Credentials</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= stats.messagesSent %></div>
+    <div class="stat-label">Messages Sent</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Recent Messages</h3></div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>From</th>
+        <th>To</th>
+        <th>Subject</th>
+        <th>Status</th>
+        <th>Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (recentMessages.length === 0) { %>
+        <tr><td colspan="5" class="empty">No messages yet. Start sending!</td></tr>
+      <% } %>
+      <% recentMessages.forEach(function(msg) { %>
+        <tr>
+          <td class="mono"><%= msg.mail_from %></td>
+          <td><%= msg.rcpt_to %></td>
+          <td><%= msg.subject || '(no subject)' %></td>
+          <td><span class="badge badge-<%= msg.status %>"><%= msg.status %></span></td>
+          <td><%= msg.created_at %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

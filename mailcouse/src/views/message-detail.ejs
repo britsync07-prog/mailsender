@@ -1,0 +1,28 @@
+<div class="page-header">
+  <h2>Message Detail</h2>
+  <a href="/portal/messages" class="btn">Back</a>
+</div>
+
+<div class="card">
+  <table class="table-details">
+    <tr><th>ID</th><td class="mono"><%= msg.id %></td></tr>
+    <tr><th>From</th><td><%= msg.mail_from %></td></tr>
+    <tr><th>To</th><td><%= msg.rcpt_to %></td></tr>
+    <tr><th>Subject</th><td><%= msg.subject || '(none)' %></td></tr>
+    <tr><th>Status</th><td><span class="badge badge-<%= msg.status %>"><%= msg.status %></span></td></tr>
+    <tr><th>Bounce</th><td><%= msg.bounce || '—' %></td></tr>
+    <tr><th>Size</th><td><%= msg.size ? (msg.size/1024).toFixed(1) + ' KB' : '—' %></td></tr>
+    <tr><th>Credential</th><td><%= msg.credential_name || '—' %></td></tr>
+    <tr><th>Domain</th><td><%= msg.domain_name || '—' %></td></tr>
+    <tr><th>Subdomain</th><td><%= msg.subdomain || '—' %></td></tr>
+    <tr><th>Created</th><td><%= msg.created_at %></td></tr>
+    <tr><th>Sent At</th><td><%= msg.sent_at || '—' %></td></tr>
+  </table>
+</div>
+
+<% if (msg.raw_headers) { %>
+<div class="card">
+  <div class="card-header"><h3>Raw Headers</h3></div>
+  <pre class="raw-headers"><%= msg.raw_headers %></pre>
+</div>
+<% } %>

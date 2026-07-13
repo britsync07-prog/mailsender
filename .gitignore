@@ -28,6 +28,9 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# DKIM keys (contains private keys)
+**/dkim-keys*.json
+
 # Temp
 .tmp/
 temp/

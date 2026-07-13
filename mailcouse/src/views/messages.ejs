@@ -1,0 +1,65 @@
+<div class="page-header">
+  <h2>Messages</h2>
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="Search by email or subject..." value="<%= search %>">
+    <select id="status-filter">
+      <option value="">All Status</option>
+      <option value="sent" <%= status === 'sent' ? 'selected' : '' %>>Sent</option>
+      <option value="bounced" <%= status === 'bounced' ? 'selected' : '' %>>Bounced</option>
+      <option value="failed" <%= status === 'failed' ? 'selected' : '' %>>Failed</option>
+      <option value="pending" <%= status === 'pending' ? 'selected' : '' %>>Pending</option>
+    </select>
+    <button class="btn btn-primary" onclick="searchMessages()">Search</button>
+  </div>
+</div>
+
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>From</th>
+        <th>To</th>
+        <th>Subject</th>
+        <th>Status</th>
+        <th>Size</th>
+        <th>Credential</th>
+        <th>Date</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (messages.length === 0) { %>
+        <tr><td colspan="8" class="empty">No messages found.</td></tr>
+      <% } %>
+      <% messages.forEach(function(m) { %>
+        <tr>
+          <td class="mono"><%= m.mail_from %></td>
+          <td><%= m.rcpt_to %></td>
+          <td><%= m.subject || '(no subject)' %></td>
+          <td><span class="badge badge-<%= m.status %>"><%= m.status %></span></td>
+          <td><%= m.size ? (m.size/1024).toFixed(1) + 'KB' : '—' %></td>
+          <td><%= m.credential_name || '—' %></td>
+          <td><%= m.created_at %></td>
+          <td><a href="/portal/messages/<%= m.id %>" class="btn btn-sm">View</a></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+  <% if (totalPages > 1) { %>
+    <div class="pagination">
+      <% for (let p = 1; p <= totalPages; p++) { %>
+        <a href="?page=<%= p %><%= status ? '&status=' + status : '' %><%= search ? '&search=' + search : '' %>"
+           class="page <%= p === page ? 'active' : '' %>"><%= p %></a>
+      <% } %>
+    </div>
+  <% } %>
+</div>
+
+<script>
+function searchMessages() {
+  const s = document.getElementById('search').value;
+  const st = document.getElementById('status-filter').value;
+  location.href = '/portal/messages?search=' + encodeURIComponent(s) + (st ? '&status=' + st : '');
+}
+</script>

@@ -438,3 +438,111 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_weekly_reports_week_start ON weekly_reports(week_start);
+
+-- ============================================================
+-- MULTI-TENANT PLATFORM (Postal-like)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(320) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    admin BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TABLE IF NOT EXISTS organizations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_organizations_owner_id ON organizations(owner_id);
+
+CREATE TABLE IF NOT EXISTS organization_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL DEFAULT 'member',
+    UNIQUE(organization_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_members_org_id ON organization_members(organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_members_user_id ON organization_members(user_id);
+
+CREATE TABLE IF NOT EXISTS customer_domains (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    domain VARCHAR(255) NOT NULL,
+    verification_token VARCHAR(100) NOT NULL,
+    verified BOOLEAN NOT NULL DEFAULT false,
+    verified_at TIMESTAMP,
+    dkim_selector VARCHAR(50),
+    dkim_private_key TEXT,
+    dkim_public_key TEXT,
+    spf_status VARCHAR(20) DEFAULT 'pending',
+    dkim_status VARCHAR(20) DEFAULT 'pending',
+    mx_status VARCHAR(20) DEFAULT 'pending',
+    return_path_status VARCHAR(20) DEFAULT 'pending',
+    outgoing BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(domain)
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_domains_org_id ON customer_domains(organization_id);
+CREATE INDEX IF NOT EXISTS idx_customer_domains_domain ON customer_domains(domain);
+
+CREATE TABLE IF NOT EXISTS smtp_credentials (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    customer_domain_id UUID REFERENCES customer_domains(id) ON DELETE SET NULL,
+    name VARCHAR(100) NOT NULL,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    type VARCHAR(20) NOT NULL DEFAULT 'smtp',
+    hold BOOLEAN NOT NULL DEFAULT false,
+    last_used_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_smtp_credentials_org_id ON smtp_credentials(organization_id);
+CREATE INDEX IF NOT EXISTS idx_smtp_credentials_username ON smtp_credentials(username);
+
+CREATE TABLE IF NOT EXISTS sent_messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    credential_id UUID REFERENCES smtp_credentials(id) ON DELETE SET NULL,
+    customer_domain_id UUID REFERENCES customer_domains(id) ON DELETE SET NULL,
+    subdomain_id UUID REFERENCES subdomains(id) ON DELETE SET NULL,
+    mail_from VARCHAR(320) NOT NULL,
+    rcpt_to TEXT NOT NULL,
+    subject TEXT,
+    body_html TEXT,
+    body_text TEXT,
+    raw_headers TEXT,
+    message_id VARCHAR(255),
+    status VARCHAR(50) NOT NULL DEFAULT 'queued',
+    bounce TEXT,
+    size INTEGER DEFAULT 0,
+    sent_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sent_messages_org_id ON sent_messages(organization_id);
+CREATE INDEX IF NOT EXISTS idx_sent_messages_status ON sent_messages(status);
+CREATE INDEX IF NOT EXISTS idx_sent_messages_created_at ON sent_messages(created_at);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mailcouse - <%= title %></title>
+  <link rel="stylesheet" href="/css/postal.css">
+</head>
+<body class="auth-page">
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="12" fill="#4F46E5"/>
+          <path d="M14 18L24 26L34 18" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 20V28C12 29.1046 12.8954 30 14 30H34C35.1046 30 36 29.1046 36 28V20" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1>Mailcouse</h1>
+      </div>
+      <p class="auth-subtitle">Multi-tenant Email Platform</p>
+
+      <% if (typeof error !== 'undefined' && error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+
+      <form action="/<%= mode %>" method="POST" class="auth-form">
+        <% if (mode === 'signup') { %>
+          <div class="form-group">
+            <label for="name">Full Name</label>
+            <input type="text" id="name" name="name" required placeholder="Your name">
+          </div>
+        <% } %>
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required placeholder="Password" minlength="8">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">
+          <%= mode === 'login' ? 'Sign In' : 'Create Account' %>
+        </button>
+      </form>
+
+      <p class="auth-footer">
+        <% if (mode === 'login') { %>
+          Don't have an account? <a href="/signup">Sign up</a>
+        <% } else { %>
+          Already have an account? <a href="/login">Sign in</a>
+        <% } %>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

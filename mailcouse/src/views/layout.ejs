@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mailcouse - <%= title %></title>
+  <link rel="stylesheet" href="/css/postal.css">
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="nav-brand">
+      <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+        <rect width="48" height="48" rx="12" fill="#4F46E5"/>
+        <path d="M14 18L24 26L34 18" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 20V28C12 29.1046 12.8954 30 14 30H34C35.1046 30 36 29.1046 36 28V20" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>Mailcouse</span>
+    </div>
+    <div class="nav-links">
+      <a href="/portal/dashboard" class="<%= active === 'dashboard' ? 'active' : '' %>">Dashboard</a>
+      <a href="/portal/domains" class="<%= active === 'domains' ? 'active' : '' %>">Domains</a>
+      <a href="/portal/credentials" class="<%= active === 'credentials' ? 'active' : '' %>">Credentials</a>
+      <a href="/portal/messages" class="<%= active === 'messages' ? 'active' : '' %>">Messages</a>
+      <a href="/portal/settings" class="<%= active === 'settings' ? 'active' : '' %>">Settings</a>
+    </div>
+    <div class="nav-user">
+      <span><%= email %></span>
+      <a href="/logout" class="btn btn-sm">Logout</a>
+    </div>
+  </nav>
+
+  <div class="main-layout">
+    <%- body %>
+  </div>
+
+  <script src="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.js"></script>
+  <script>
+    // Convert any element with data-chart attribute to Chartist chart
+    document.querySelectorAll('[data-chart]').forEach(el => {
+      try {
+        const data = JSON.parse(el.getAttribute('data-chart-data') || '{}');
+        const opts = JSON.parse(el.getAttribute('data-chart-options') || '{}');
+        new Chartist[el.getAttribute('data-chart')](el, data, opts);
+      } catch(e) { console.warn('Chart error:', e); }
+    });
+  </script>
+</body>
+</html>
