@@ -3,6 +3,7 @@ import { simpleParser, ParsedMail } from 'mailparser';
 import bcrypt from 'bcryptjs';
 import * as dns from 'dns';
 import * as net from 'net';
+import * as nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import { query } from './db/connection';
 import { config } from './config';
@@ -41,7 +42,7 @@ async function deliverEmail(mxHost: string, port: number, envelopeFrom: string, 
       try {
         switch (step) {
           case 0:
-            if (code === 220) { step = 1; s.write(`EHLO mailcouse\r\n`); buf = ''; }
+            if (code === 220) { step = 1; s.write(`EHLO live.noblecircle.online\r\n`); buf = ''; }
             else done(null, { success: false, code, message: msg });
             break;
           case 1: step = 2; s.write(`MAIL FROM:<${envelopeFrom}>\r\n`); buf = ''; break;
@@ -70,10 +71,10 @@ async function deliverEmail(mxHost: string, port: number, envelopeFrom: string, 
   });
 }
 
-export function createSmtpRelay(): SMTPServer {
+export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
   const server = new SMTPServer({
     name: 'mailcouse',
-    banner: 'Mailcouse SMTP Relay',
+    banner: `Mailcouse SMTP - ${tier}`,
     authMethods: ['PLAIN', 'LOGIN'],
     allowInsecureAuth: true,
     disabledCommands: ['STARTTLS'],
@@ -81,8 +82,8 @@ export function createSmtpRelay(): SMTPServer {
     async onAuth(auth: SMTPServerAuthentication, session: SMTPServerSession, callback: (err: Error | null | undefined, response?: SMTPServerAuthenticationResponse) => void) {
       try {
         if (!auth.username) return callback(new Error('Authentication failed'));
-        const result = await query<{ id: string; password_hash: string; organization_id: string; customer_domain_id: string; hold: boolean }>(
-          `SELECT id, password_hash, organization_id, customer_domain_id, hold
+        const result = await query<{ id: string; password_hash: string; organization_id: string; customer_domain_id: string; hold: boolean; tier: string }>(
+          `SELECT id, password_hash, organization_id, customer_domain_id, hold, tier
            FROM smtp_credentials WHERE username = $1`,
           [auth.username]
         );
@@ -90,6 +91,8 @@ export function createSmtpRelay(): SMTPServer {
         if (result.rows.length === 0) return callback(new Error('Authentication failed'));
         const cred = result.rows[0];
         if (cred.hold) return callback(new Error('Credential is on hold'));
+
+        if (cred.tier && cred.tier !== tier) return callback(new Error(`Credential not allowed on this port (requires ${cred.tier} port)`));
 
         const valid = await bcrypt.compare(auth.password || '', cred.password_hash);
         if (!valid) return callback(new Error('Authentication failed'));
@@ -112,34 +115,37 @@ export function createSmtpRelay(): SMTPServer {
         const parsed = await simpleParser(raw);
 
         const envFrom = session.envelope.mailFrom;
-        const mailFrom = parsed.from?.text || (envFrom && typeof envFrom === 'object' ? envFrom.address : 'unknown');
+        const fromAddr = parsed.from?.value?.[0]?.address ||
+          (envFrom && typeof envFrom === 'object' ? envFrom.address : null);
+        if (!fromAddr) return callback(new Error('No valid From address'));
+
+        const domainPart = fromAddr.split('@')[1];
+        if (!domainPart) return callback(new Error('Invalid From address'));
+
+        const domResult = await query<{ id: string }>(
+          'SELECT id FROM customer_domains WHERE domain = $1 AND organization_id = $2 AND verified = true',
+          [domainPart, authUser.organizationId]
+        );
+        if (domResult.rows.length === 0) {
+          return callback(new Error(`Domain ${domainPart} is not authorized for sending`));
+        }
+        const customerDomainId = domResult.rows[0].id;
+
         const subject = parsed.subject || '(no subject)';
         const size = raw.length;
 
-        // Find customer domain from the mail from address
-        const domainPart = mailFrom.split('@')[1];
-        let customerDomainId = authUser.customerDomainId;
-        if (!customerDomainId && domainPart) {
-          const domResult = await query<{ id: string }>(
-            'SELECT id FROM customer_domains WHERE domain = $1 AND organization_id = $2 AND verified = true',
-            [domainPart, authUser.organizationId]
-          );
-          if (domResult.rows.length > 0) customerDomainId = domResult.rows[0].id;
-        }
-
-        // Pick a random available subdomain from the pool
         const sdResult = await query<{ id: string; subdomain: string; root_domain: string; sender_name: string }>(
           `SELECT s.id, s.subdomain, d.domain as root_domain, s.sender_name
            FROM subdomains s JOIN domains d ON s.domain_id = d.id
-           WHERE s.status = 'active' AND s.emails_sent_today < s.daily_limit
-           ORDER BY RANDOM() LIMIT 1`
+           WHERE s.status = 'active' AND s.tier = $1 AND s.emails_sent_today < s.daily_limit
+           ORDER BY RANDOM() LIMIT 1`,
+          [tier]
         );
         if (sdResult.rows.length === 0) return callback(new Error('No available sending subdomains'));
 
         const sub = sdResult.rows[0];
-        const localPart = sub.sender_name.replace(/\s+/g, '.').toLowerCase();
-        const envelopeFrom = `${localPart}@${sub.root_domain}`;
-        const headerFrom = `${sub.sender_name} <${localPart}@${sub.subdomain}>`;
+        const envelopeFrom = envFrom && typeof envFrom === 'object' ? envFrom.address : fromAddr;
+        const headerFrom = parsed.from?.text || fromAddr;
         const msgId = `<${crypto.randomUUID()}@${sub.subdomain}>`;
         const toText = parsed.to && typeof parsed.to === 'object' && 'text' in parsed.to ? (parsed.to as any).text : '';
 
@@ -170,11 +176,7 @@ export function createSmtpRelay(): SMTPServer {
           }
         } catch {}
 
-        const mimeMessage = Object.entries(hdrs).map(([k, v]) => `${k}: ${v}`).join('\r\n')
-          + '\r\n\r\n' + (parsed.html || parsed.text || '');
-
-        // Deliver to all recipients
-        const rcptTo: string[] = [];
+                const rcptTo: string[] = [];
         if (session.envelope.rcptTo) {
           for (const r of session.envelope.rcptTo) {
             if (r && typeof r === 'object' && 'address' in r) rcptTo.push(r.address);
@@ -193,14 +195,43 @@ export function createSmtpRelay(): SMTPServer {
 
             let delivered = false;
             for (const mx of mxRecords) {
-              const result = await deliverEmail(mx.exchange, 25, envelopeFrom, recipient, mimeMessage);
-              if (result.success) {
-                results.push({ to: recipient, success: true, message: result.message });
+              try {
+                const keyData = await getDKIMPrivateKey(sub.id);
+                const transporter = nodemailer.createTransport({
+                  host: mx.exchange,
+                  port: 25,
+                  secure: false,
+                  tls: { rejectUnauthorized: false },
+                  dkim: keyData ? {
+                    domainName: sub.root_domain,
+                    keySelector: keyData.selector,
+                    privateKey: keyData.privateKey,
+                  } : undefined,
+                });
+
+                const info = await transporter.sendMail({
+                  from: headerFrom,
+                  envelope: { from: envelopeFrom, to: [recipient] },
+                  to: recipient,
+                  subject,
+                  text: parsed.text || '',
+                  html: parsed.html || undefined,
+                  messageId: msgId,
+                });
+
+                transporter.close();
+                results.push({ to: recipient, success: true, message: info.response });
                 delivered = true;
                 break;
+              } catch (err: any) {
+                if (!delivered && mx === mxRecords[mxRecords.length - 1]) {
+                  results.push({ to: recipient, success: false, message: err.message });
+                }
               }
             }
-            if (!delivered) results.push({ to: recipient, success: false, message: 'All MX servers failed' });
+            if (!delivered) {
+              results.push({ to: recipient, success: false, message: 'All MX servers failed' });
+            }
           } catch (err: any) {
             results.push({ to: recipient, success: false, message: err.message });
           }
@@ -213,7 +244,7 @@ export function createSmtpRelay(): SMTPServer {
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             authUser.organizationId, authUser.credentialId, customerDomainId, sub.id,
-            mailFrom, rcptTo.join(', '), subject, parsed.html || '', parsed.text || '',
+            fromAddr, rcptTo.join(', '), subject, parsed.html || '', parsed.text || '',
             JSON.stringify(parsed.headers || {}), size,
             allSuccess ? 'sent' : 'failed',
             msgId,
