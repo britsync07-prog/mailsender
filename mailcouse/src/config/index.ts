@@ -107,6 +107,11 @@ export const config = {
     sessionExpiryHours: 72,
     smtpPort: parseInt(process.env.SMTP_PORT || '587'),
     smtpPortAlt: parseInt(process.env.SMTP_PORT_ALT || '25'),
+    smtpPorts: {
+      mass_mail: parseInt(process.env.SMTP_PORT_MASS || '587'),
+      personal: parseInt(process.env.SMTP_PORT_PERSONAL || '588'),
+      transactional: parseInt(process.env.SMTP_PORT_TRANSACTIONAL || '589'),
+    },
   },
 
   // Validation

@@ -1,5 +1,3 @@
-// Cron types and interfaces — full TSD §16.3 schedule
-
 export type CronJobName =
   | 'midnight_reset'
   | 'ip_blacklist_check'
@@ -14,7 +12,10 @@ export type CronJobName =
   | 'weekly_report'
   | 'dead_letter_review'
   | 'domain_expiry_check'
-  | 'daily_report';
+  | 'daily_report'
+  | 'warmup_send'
+  | 'warmup_progression'
+  | 'warmup_reset';
 
 export interface CronJobConfig {
   name: CronJobName;
@@ -64,4 +65,7 @@ export const CRON_SCHEDULES: CronJobConfig[] = [
   { name: 'dead_letter_review', schedule: '0 8 * * *', description: 'Alert if dead letter queue non-empty', enabled: true },
   { name: 'domain_expiry_check', schedule: '0 10 * * *', description: 'Alert on domain expiring within 30 days', enabled: true },
   { name: 'daily_report', schedule: '5 0 * * *', description: 'Generate daily volume report', enabled: true },
+  { name: 'warmup_send', schedule: '0 */1 * * *', description: 'Send cross-domain warmup emails', enabled: true },
+  { name: 'warmup_progression', schedule: '0 6 * * *', description: 'Progress warmup phase for subdomains', enabled: true },
+  { name: 'warmup_reset', schedule: '0 0 * * *', description: 'Reset warmup daily counters', enabled: true },
 ];

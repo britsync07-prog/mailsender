@@ -31,6 +31,9 @@ coverage/
 # DKIM keys (contains private keys)
 **/dkim-keys*.json
 
+# Credentials
+credentials.txt
+
 # Temp
 .tmp/
 temp/

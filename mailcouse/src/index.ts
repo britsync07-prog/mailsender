@@ -18,6 +18,8 @@ import { authenticate } from './api/auth-middleware';
 import { formatDashboardHTML } from './monitoring/dashboard';
 import { getDashboardData } from './monitoring/dashboard';
 import { startCronRunner, stopCronRunner } from './cron/cron-runner';
+import trackingRoutes from './api/tracking-routes';
+import { startBounceHandler, stopBounceHandler } from './bounce/handler';
 import fetch from 'node-fetch';
 
 const app = express();
@@ -71,6 +73,7 @@ app.use('/api/admin', apiLimiter, adminRoutes);
 app.use('/api/send', apiLimiter, sendRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/portal', apiLimiter, portalRoutes);
+app.use('/track', trackingRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -87,7 +90,7 @@ app.get('/dashboard', async (_req, res) => {
 });
 
 app.get('/', (_req, res) => {
-  res.redirect('/dashboard');
+  res.redirect('/login');
 });
 
 app.get('/api/cron-jobs', (_req, res) => {
@@ -268,9 +271,27 @@ app.get('/portal/settings', async (req, res) => {
   } catch { res.redirect('/login'); }
 });
 
+app.get('/portal/subdomains', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/subdomains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { subdomains: [] };
+    const search = (req.query.search as string || '').toLowerCase();
+    const filtered = data.subdomains.filter((s: any) => !search || s.subdomain.includes(search) || s.root_domain.includes(search));
+    res.render('subdomains', { layout: 'application', subdomains: filtered, title: 'Subdomains', active: 'subdomains', email: userData.user?.email || '', token, search: req.query.search || '' });
+  } catch { res.redirect('/login'); }
+});
+
 // ─── SMTP Relay Server ────────────────────────────────────
 import { createSmtpRelay } from './smtp-relay';
-let smtpServer: any = null;
+const smtpServers: any[] = [];
 
 app.get('/portal/routes', async (req, res) => {
   const token = getToken(req);
@@ -358,19 +379,22 @@ async function start() {
     await startCronRunner();
     console.log('Cron runner started');
 
+    // Start bounce handler on port 2525 (forwarded from port 25 via iptables)
+    startBounceHandler(2525);
+
     app.listen(config.api.port, config.api.host, () => {
       console.log(`Mailcouse server running on ${config.api.host}:${config.api.port}`);
       console.log(`Health: http://localhost:${config.api.port}/health`);
       console.log(`UI: http://localhost:${config.api.port}/login`);
     });
 
-    // Start SMTP relay
-    smtpServer = createSmtpRelay();
-    const smtpPort = config.platform.smtpPort;
-    smtpServer.listen(smtpPort, () => {
-      console.log(`SMTP relay listening on port ${smtpPort}`);
+    Object.entries(config.platform.smtpPorts).forEach(([tier, port]) => {
+      const server = createSmtpRelay(tier);
+      server.listen(port, () => {
+        console.log(`SMTP relay [${tier}] listening on port ${port}`);
+      });
+      smtpServers.push(server);
     });
-    console.log(`SMTP relay ready on port ${config.platform.smtpPort}${config.platform.smtpPort !== config.platform.smtpPortAlt ? ` and ${config.platform.smtpPortAlt}` : ''}`);
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
@@ -387,10 +411,12 @@ const shutdown = async (signal: string) => {
   try {
     await stopCronRunner();
     console.log('Cron runner stopped');
-    if (smtpServer) {
-      await new Promise<void>((resolve) => smtpServer.close(() => resolve()));
-      console.log('SMTP relay stopped');
+    stopBounceHandler();
+    console.log('Bounce handler stopped');
+    for (const server of smtpServers) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+    console.log(`SMTP relays stopped (${smtpServers.length} servers)`);
     await closePool();
     console.log('Database pool closed');
     clearTimeout(timeout);

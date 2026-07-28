@@ -48,7 +48,15 @@
         <li class="mailGraph__key--out">Outgoing Messages</li>
         <li>Incoming Messages</li>
       </ul>
-      <div class="mailGraph__graph" data-chart="Line" data-chart-data='<%= JSON.stringify({labels:["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],series:[[<%= stats.graphOutgoing || "0,0,0,0,0,0,0" %>],[<%= stats.graphIncoming || "0,0,0,0,0,0,0" %>]]}) %>' data-chart-options='{"showPoint":false,"lineSmooth":false,"axisX":{"showLabel":true},"axisY":{"showLabel":false}}'></div>
+      <% var chartOut = (stats.graphOutgoing || '0,0,0,0,0,0,0').split(',').map(Number); %>
+      <% var chartIn  = (stats.graphIncoming || '0,0,0,0,0,0,0').split(',').map(Number); %>
+      <%
+        var chartData = JSON.stringify({
+          labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+          series:[chartOut, chartIn]
+        });
+      %>
+      <div class="mailGraph__graph" data-chart="Line" data-chart-data='<%= chartData %>' data-chart-options='{"showPoint":false,"lineSmooth":false,"axisX":{"showLabel":true},"axisY":{"showLabel":false}}'></div>
       <ul class="mailGraph__labels">
         <li>Last 7 days &rarr;</li>
         <li>Today</li>

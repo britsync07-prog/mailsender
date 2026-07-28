@@ -9,6 +9,7 @@ import { checkAllDomainsPostmaster } from '../monitoring/postmaster-client';
 import { checkAndRetireDomains } from '../monitoring/domain-retirement';
 import { checkAndReplaceIPs } from '../monitoring/ip-replacement';
 import { createAlert, sendAlert } from '../monitoring/alert-dispatcher';
+import { sendCrossDomainWarmup, progressWarmup, generateWarmupEngagement, resetWarmupCounters } from '../warmup/service';
 
 interface HandlerResult {
   success: boolean;
@@ -83,6 +84,25 @@ const jobHandlers: Record<string, () => Promise<CronJobResult>> = {
   }),
   rdp_heartbeat: wrapHandler('rdp_heartbeat', async () => {
     return { message: 'RDP heartbeat check completed (stub)' };
+  }),
+  warmup_send: wrapHandler('warmup_send', async () => {
+    const [sendRes, engageRes] = await Promise.all([
+      sendCrossDomainWarmup(),
+      generateWarmupEngagement(),
+    ]);
+    return {
+      message: `Warmup send: ${sendRes.sent} sent, ${sendRes.errors} errors. Engagement: ${engageRes.opens} opens, ${engageRes.replies} replies`,
+    };
+  }),
+  warmup_progression: wrapHandler('warmup_progression', async () => {
+    const result = await progressWarmup();
+    return {
+      message: `Warmup progression: ${result.activated} activated, ${result.extended} extended`,
+    };
+  }),
+  warmup_reset: wrapHandler('warmup_reset', async () => {
+    await resetWarmupCounters();
+    return { message: 'Warmup counters reset' };
   }),
 };
 

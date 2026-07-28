@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS subdomains (
     sender_name VARCHAR(100) NOT NULL,
     warmup_complete BOOLEAN NOT NULL DEFAULT false,
     warmup_started_at TIMESTAMP,
-    daily_limit INTEGER NOT NULL DEFAULT 3,
+    daily_limit INTEGER NOT NULL DEFAULT 10,
     emails_sent_today INTEGER NOT NULL DEFAULT 0,
     status VARCHAR(50) NOT NULL DEFAULT 'provisioning',
     assigned_ip_id UUID,
@@ -539,7 +539,7 @@ CREATE INDEX IF NOT EXISTS idx_sent_messages_created_at ON sent_messages(created
 CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token VARCHAR(255) NOT NULL UNIQUE,
+    token VARCHAR(512) NOT NULL UNIQUE,
     expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

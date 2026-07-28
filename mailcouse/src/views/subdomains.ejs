@@ -1,0 +1,114 @@
+<div class="pageHeader">
+  <div class="pageHeader__title">Subdomains</div>
+</div>
+
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/subdomains" class="navBar__link is-active">All Subdomains</a></li>
+    <li class="navBar__item navBar__item--end">
+      <input type="text" id="search" placeholder="Search subdomain..." value="<%= search %>" style="margin-right:8px;padding:4px 8px;font-size:13px;border:1px solid #ccc;border-radius:3px" onkeyup="if(event.key==='Enter')searchSubdomains()">
+      <a href="javascript:searchSubdomains()" class="button button--positive">Search</a>
+    </li>
+  </ul>
+</nav>
+
+<div class="pageContent">
+  <% if (subdomains.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">No subdomains found.</h2>
+      <p class="noData__text">There are no subdomains matching your search criteria.</p>
+    </div>
+  <% } else { %>
+    <p class="pageContent__intro u-margin">Showing <%= subdomains.length %> subdomains. Each subdomain sends independently and can have its own daily limit.</p>
+    <table class="dataTable u-margin">
+      <thead>
+        <tr>
+          <th>Subdomain</th>
+          <th>Domain</th>
+          <th>Sender</th>
+          <th>Total Sent</th>
+          <th>Today</th>
+          <th>Limit</th>
+          <th>Status</th>
+          <th>Warmup</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% subdomains.forEach(function(s) { %>
+          <tr>
+            <td class="mono"><%= s.subdomain %></td>
+            <td><%= s.root_domain %></td>
+            <td><%= s.sender_name %></td>
+            <td class="dataTable__centerCell"><%= s.total_sent %></td>
+            <td class="dataTable__centerCell"><%= s.emails_sent_today %></td>
+            <td class="dataTable__centerCell"><span id="limit-<%= s.id %>"><%= s.daily_limit %></span></td>
+            <td><span class="label label--<%= s.status === 'active' ? 'green' : 'amber' %>"><%= s.status %></span></td>
+            <td class="dataTable__centerCell"><%= s.warmup_complete ? '&#10003;' : '&#8212;' %></td>
+            <td><a href="javascript:showEditLimit('<%= s.id %>', '<%= s.subdomain %>', <%= s.daily_limit %>)" class="button button--small">Edit</a></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+
+<div class="modal" id="limit-modal" style="display:none">
+  <div class="modal__backdrop" onclick="hideEditLimit()"></div>
+  <div class="modal__content">
+    <div class="modal__header">Edit Daily Limit</div>
+    <div class="modal__body">
+      <p id="limit-subdomain-label"></p>
+      <div class="form-group">
+        <label>Daily Limit (1–1000)</label>
+        <input type="number" id="edit-limit-value" min="1" max="1000" value="10" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:3px">
+        <p style="color:#999;font-size:12px;margin-top:6px">Current limit: <span id="current-limit"></span></p>
+      </div>
+    </div>
+    <div class="modal__footer">
+      <a href="javascript:hideEditLimit()" class="button">Cancel</a>
+      <a href="javascript:saveLimit()" class="button button--positive" id="save-limit-btn">Save</a>
+    </div>
+  </div>
+</div>
+
+<script>
+let editingSubdomainId = null;
+
+function searchSubdomains() {
+  const s = document.getElementById('search').value;
+  location.href = '/portal/subdomains?search=' + encodeURIComponent(s);
+}
+
+function showEditLimit(id, subdomain, current) {
+  editingSubdomainId = id;
+  document.getElementById('limit-subdomain-label').innerHTML = 'Subdomain: <strong>' + subdomain + '</strong>';
+  document.getElementById('edit-limit-value').value = current;
+  document.getElementById('current-limit').textContent = current;
+  document.getElementById('limit-modal').style.display = 'flex';
+}
+
+function hideEditLimit() {
+  editingSubdomainId = null;
+  document.getElementById('limit-modal').style.display = 'none';
+}
+
+async function saveLimit() {
+  const val = parseInt(document.getElementById('edit-limit-value').value);
+  if (isNaN(val) || val < 1 || val > 1000) return alert('Enter a number between 1 and 1000');
+  const btn = document.getElementById('save-limit-btn');
+  btn.textContent = 'Saving...'; btn.style.pointerEvents = 'none';
+  try {
+    const res = await fetch('/api/portal/subdomains/' + editingSubdomainId + '/limit', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer <%= token %>' },
+      body: JSON.stringify({ daily_limit: val })
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.error);
+    document.getElementById('limit-' + editingSubdomainId).textContent = val;
+    hideEditLimit();
+  } catch(e) { alert('Error: ' + e.message); }
+  btn.textContent = 'Save'; btn.style.pointerEvents = 'auto';
+}
+</script>

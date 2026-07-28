@@ -242,6 +242,40 @@ router.delete('/credentials/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Subdomains ───────────────────────────────────────────
+
+router.get('/subdomains', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT s.id, s.subdomain, d.domain as root_domain, s.sender_name,
+              s.total_sent, s.emails_sent_today, s.daily_limit,
+              s.warmup_complete, s.status, s.bounce_rate,
+              s.engagement_score, s.created_at
+       FROM subdomains s JOIN domains d ON s.domain_id = d.id
+       ORDER BY d.domain, s.subdomain`
+    );
+    res.json({ subdomains: result.rows });
+  } catch (err) {
+    console.error('Subdomains error:', err);
+    res.status(500).json({ error: 'Failed to list subdomains' });
+  }
+});
+
+router.put('/subdomains/:id/limit', async (req: Request, res: Response) => {
+  try {
+    const { daily_limit } = req.body;
+    const limit = parseInt(daily_limit);
+    if (isNaN(limit) || limit < 1 || limit > 1000) {
+      return res.status(400).json({ error: 'daily_limit must be a number between 1 and 1000' });
+    }
+    await query('UPDATE subdomains SET daily_limit = $1 WHERE id = $2', [limit, req.params.id]);
+    res.json({ success: true, daily_limit: limit });
+  } catch (err) {
+    console.error('Update limit error:', err);
+    res.status(500).json({ error: 'Failed to update daily limit' });
+  }
+});
+
 // ─── Sent Messages ────────────────────────────────────────
 
 router.get('/messages', async (req: Request, res: Response) => {
