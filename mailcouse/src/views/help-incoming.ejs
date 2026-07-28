@@ -1,0 +1,57 @@
+<div class="pageHeader">
+  <div class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Help &rarr;</span>
+    Receiving E-Mail
+  </div>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/help/outgoing" class="navBar__link">Sending E-Mail</a></li>
+    <li class="navBar__item"><a href="/portal/help/incoming" class="navBar__link is-active">Receiving E-Mail</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <h1 class="pageContent__title">Receiving e-mail</h1>
+  <h2 class="pageContent__intro u-margin">
+    This system can handle your incoming e-mail by accepting it from other mail servers and
+    sending it on to your own applications using HTTP or to forward it to other SMTP servers.
+  </h2>
+  <p class="u-margin pageContent__helpLink"><a href="/portal/help/outgoing">Read more about sending e-mails</a></p>
+
+  <div class="u-margin">
+    <h2 class="pageContent__subTitle">Forwarding e-mails</h2>
+    <p class="pageContent__text">
+      If you already have an incoming mail server for your domain, you may find the quickest
+      way to get up and running is to simply forward e-mail from that server.
+      You don't need to make any changes to your DNS to do this.
+    </p>
+    <p class="pageContent__text">
+      Just <a href="/portal/routes" class="u-link">create an incoming route</a>
+      for the address you want to receive messages for and then you'll be provided with
+      an e-mail address that messages can be forwarded to. Any message that is received to
+      this address will be treated as if it had been sent directly to the address on the route.
+    </p>
+    <p class="pageContent__text">
+      The address to forward mail to can be found by clicking on the route and copying the
+      field marked Address from the form.
+    </p>
+  </div>
+
+  <div class="u-margin">
+    <h2 class="pageContent__subTitle">Setting your MX records</h2>
+    <p class="pageContent__text">
+      If you don't already have a mail server on your domain, you can simply set your
+      MX records to point to this system. The MX records are shown
+      below and you should add these both as priority 10 in your DNS configuration. Once
+      these have been added successfully they will show with a green tick on your domain list.
+    </p>
+    <dl class="pageContent__definitions">
+      <dt>MX Records</dt>
+      <dd>
+        <p class="pageContent__definitionCode">live.noblecircle.online</p>
+      </dd>
+    </dl>
+  </div>
+</div>

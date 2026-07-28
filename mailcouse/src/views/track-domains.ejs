@@ -37,6 +37,8 @@
           </div>
           <ul class="domainList__properties">
             <li class="domainList__links">
+              <a href="javascript:toggleSSL('<%= td.id %>')"><%= td.ssl_enabled ? 'Disable SSL' : 'Enable SSL' %></a>
+              <a href="javascript:checkDNS('<%= td.id %>')">Check DNS</a>
               <a href="javascript:deleteTrackDomain('<%= td.id %>')" class="domainList__delete">Delete</a>
             </li>
           </ul>
@@ -86,6 +88,18 @@ async function addTrackDomain() {
 async function deleteTrackDomain(id) {
   if (!confirm('Delete this tracking domain?')) return;
   await fetch('/api/portal/track-domains/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
+  location.reload();
+}
+async function toggleSSL(id) {
+  await fetch('/api/portal/track-domains/' + id + '/toggle-ssl', { method: 'POST', headers: { 'Authorization':'Bearer <%= token %>' } });
+  location.reload();
+}
+async function checkDNS(id) {
+  var btn = event.target;
+  btn.textContent = 'Checking...';
+  var r = await fetch('/api/portal/track-domains/' + id + '/check', { method: 'POST', headers: { 'Authorization':'Bearer <%= token %>' } });
+  var d = await r.json();
+  alert(d.message || 'DNS check completed');
   location.reload();
 }
 </script>

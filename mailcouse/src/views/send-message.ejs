@@ -1,0 +1,124 @@
+<div class="pageHeader">
+  <div class="pageHeader__title">Send Message</div>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/messages/outgoing" class="navBar__link">Outgoing Messages</a></li>
+    <li class="navBar__item"><a href="/portal/messages/incoming" class="navBar__link">Incoming Messages</a></li>
+    <li class="navBar__item"><a href="/portal/messages/queue" class="navBar__link">Queue</a></li>
+    <li class="navBar__item"><a href="/portal/messages/held" class="navBar__link">Held</a></li>
+    <li class="navBar__item"><a href="/portal/send" class="navBar__link is-active">Send Message</a></li>
+    <li class="navBar__item"><a href="/portal/messages/suppressions" class="navBar__link">Suppressions</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <p class="pageContent__intro u-margin">
+    You can use this form to send a message through this mail server. This is useful
+    for testing and debugging purposes.
+  </p>
+
+  <% if (direction !== 'incoming') { %>
+    <p class="pageContent__text u-margin newMessageType newMessageType--outgoing">
+      <b>You are sending an outgoing message.</b> This e-mail will be routed as if it was an e-mail sent from your mail server.
+      <a href="/portal/send?direction=incoming" class="u-link">Simulate an incoming e-mail instead?</a>
+    </p>
+  <% } else { %>
+    <p class="pageContent__text u-margin newMessageType newMessageType--incoming">
+      <b>You are sending an incoming message.</b> This e-mail can only be sent to your routes and will behave as if it was received by your mail server.
+      <a href="/portal/send" class="u-link">Simulate an outgoing e-mail instead?</a>
+    </p>
+  <% } %>
+
+  <form action="/api/portal/send" method="POST" id="send-message-form" onsubmit="return sendMessage(event)">
+    <input type="hidden" name="direction" value="<%= direction || 'outgoing' %>">
+
+    <fieldset class="fieldSet">
+      <% if (direction !== 'incoming') { %>
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="message_from">From</label>
+          <div class="fieldSet__input">
+            <input type="text" name="message[from]" id="message_from" class="input input--text" value="<%= message.from || '' %>" autofocus>
+            <p class="fieldSet__text">
+              Enter the address that you wish to send the message from. This must be
+              an address which exists at one of your verified domains.
+            </p>
+          </div>
+        </div>
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="message_to">To</label>
+          <div class="fieldSet__input">
+            <input type="text" name="message[to]" id="message_to" class="input input--text" value="<%= message.to || '' %>">
+          </div>
+        </div>
+      <% } else { %>
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="message_route">Route</label>
+          <div class="fieldSet__input">
+            <select name="message[route_id]" id="message_route" class="input input--text">
+              <option value="">Select a route...</option>
+              <% (routes || []).forEach(function(r) { %>
+                <option value="<%= r.id %>"><%= r.name || r.match_type %>: <%= r.action_value %></option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="message_from">From</label>
+          <div class="fieldSet__input">
+            <input type="text" name="message[from]" id="message_from" class="input input--text" value="<%= message.from || '' %>">
+          </div>
+        </div>
+      <% } %>
+
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="message_subject">Subject</label>
+        <div class="fieldSet__input">
+          <input type="text" name="message[subject]" id="message_subject" class="input input--text" value="<%= message.subject || '' %>">
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="message_plain_body">Body</label>
+        <div class="fieldSet__input">
+          <textarea name="message[plain_body]" id="message_plain_body" class="input input--area"><%= message.plain_body || '' %></textarea>
+        </div>
+      </div>
+    </fieldset>
+    <p class="fieldSetSubmit buttonSet">
+      <input type="submit" value="Send Message" class="button button--positive js-form-submit">
+    </p>
+  </form>
+</div>
+
+<script>
+async function sendMessage(event) {
+  event.preventDefault();
+  var form = event.target;
+  var btn = form.querySelector('.js-form-submit');
+  btn.disabled = true;
+  btn.value = 'Sending...';
+  try {
+    var fd = new FormData(form);
+    var data = {};
+    for (var pair of fd.entries()) data[pair[0]] = pair[1];
+    var res = await fetch('/api/portal/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    var json = await res.json();
+    if (res.ok && json.id) {
+      window.location.href = '/portal/messages/' + json.id;
+    } else {
+      alert(json.error || 'Failed to send message');
+      btn.disabled = false;
+      btn.value = 'Send Message';
+    }
+  } catch(e) {
+    alert('Failed to send message: ' + e.message);
+    btn.disabled = false;
+    btn.value = 'Send Message';
+  }
+}
+</script>

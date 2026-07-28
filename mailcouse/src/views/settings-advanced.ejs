@@ -1,0 +1,120 @@
+<div class="pageHeader">
+  <div class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Server &rarr;</span>
+    Advanced Settings
+  </div>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Server Settings</a></li>
+    <li class="navBar__item"><a href="/portal/settings/spam" class="navBar__link">Spam</a></li>
+    <li class="navBar__item"><a href="/portal/settings/retention" class="navBar__link">Retention</a></li>
+    <li class="navBar__item"><a href="/portal/settings/limits" class="navBar__link">Send Limit</a></li>
+    <li class="navBar__item"><a href="/portal/settings/advanced" class="navBar__link is-active">Advanced Settings</a></li>
+    <li class="navBar__item"><a href="/portal/settings/delete" class="navBar__link">Delete</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <form action="/api/portal/settings/advanced" method="POST" id="advanced-settings-form" onsubmit="return saveAdvancedSettings(event)">
+    <fieldset class="fieldSet fieldSet--wide">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="send_limit">Send limit</label>
+        <div class="fieldSet__input">
+          <input type="text" name="send_limit" id="send_limit" class="input input--text" value="<%= server.send_limit || '' %>" placeholder="No limit">
+          <p class="fieldSet__text">This is the maximum number of e-mails that can be sent through this mail server in a 60 minute period.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="allow_sender">Allow sender header</label>
+        <div class="fieldSet__input">
+          <select name="allow_sender" id="allow_sender" class="input input--select">
+            <option value="false" <%= server.allow_sender === false || !server.allow_sender ? 'selected' : '' %>>No</option>
+            <option value="true" <%= server.allow_sender ? 'selected' : '' %>>Yes - can use Sender header</option>
+          </select>
+          <p class="fieldSet__text">If enabled, outgoing messages can use any address in the From header as long as a Sender header is included with an authorized address.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="privacy_mode">Privacy mode</label>
+        <div class="fieldSet__input">
+          <select name="privacy_mode" id="privacy_mode" class="input input--select">
+            <option value="false" <%= server.privacy_mode === false || !server.privacy_mode ? 'selected' : '' %>>Disabled</option>
+            <option value="true" <%= server.privacy_mode ? 'selected' : '' %>>Enabled</option>
+          </select>
+          <p class="fieldSet__text">If enabled, when adding Received headers to e-mails it will not include IP or hostname information of the client submitting the message.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="message_retention_days">Message retention days</label>
+        <div class="fieldSet__input">
+          <input type="text" name="message_retention_days" id="message_retention_days" class="input input--text" value="<%= server.message_retention_days || '' %>">
+          <p class="fieldSet__text">The number of days that message meta data is stored in the database after it has been added.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="raw_message_retention_days">Raw message retention days</label>
+        <div class="fieldSet__input">
+          <input type="text" name="raw_message_retention_days" id="raw_message_retention_days" class="input input--text" value="<%= server.raw_message_retention_days || '' %>">
+          <p class="fieldSet__text">The number of days that raw message data (bodies & attachments) are stored in the database after it has been added.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="raw_message_retention_size">Raw message retention size</label>
+        <div class="fieldSet__input">
+          <input type="text" name="raw_message_retention_size" id="raw_message_retention_size" class="input input--text" value="<%= server.raw_message_retention_size || '' %>">
+          <p class="fieldSet__text">The total amount of disk space (in megabytes) to allow raw message data to use on the disk. Older messages will be deleted to keep the total usage below this amount.</p>
+        </div>
+      </div>
+    </fieldset>
+    <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
+      <input type="submit" value="Save server" class="button button--positive js-form-submit">
+    </div>
+  </form>
+
+  <hr style="margin:30px 0;border:none;border-top:1px solid #e0e0e0;">
+
+  <% if (server.suspended_at) { %>
+    <form action="/api/portal/settings/unsuspend" method="POST">
+      <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
+        <input type="submit" value="Unsuspend server" class="button button--danger js-form-submit">
+      </div>
+    </form>
+  <% } else { %>
+    <form action="/api/portal/settings/suspend" method="POST" onsubmit="return confirm('Are you sure you wish to suspend this server?')">
+      <fieldset class="fieldSet fieldSet--wide">
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="suspension_reason">Suspension Reason</label>
+          <div class="fieldSet__input">
+            <input type="text" name="reason" id="suspension_reason" class="input input--text" required>
+            <p class="fieldSet__text">If you wish to disable this server and stop it sending messages, enter a reason above. Any users assigned to the server will be notified of the suspension by e-mail.</p>
+          </div>
+        </div>
+      </fieldset>
+      <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
+        <input type="submit" value="Suspend server" class="button button--positive js-form-submit">
+      </div>
+    </form>
+  <% } %>
+</div>
+
+<script>
+async function saveAdvancedSettings(event) {
+  event.preventDefault();
+  var form = event.target;
+  var btn = form.querySelector('.js-form-submit');
+  btn.disabled = true; btn.value = 'Saving...';
+  try {
+    var fd = new FormData(form);
+    var data = {};
+    for (var pair of fd.entries()) data[pair[0]] = pair[1];
+    var res = await fetch('/api/portal/settings/advanced', { method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (res.ok) { btn.value = 'Saved'; setTimeout(function() { btn.value = 'Save server'; btn.disabled = false; }, 2000); }
+    else { var j = await res.json(); alert(j.error); btn.disabled = false; btn.value = 'Save server'; }
+  } catch(e) { alert('Error: ' + e.message); btn.disabled = false; btn.value = 'Save server'; }
+}
+</script>
