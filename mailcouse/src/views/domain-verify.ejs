@@ -1,0 +1,131 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Organization &rarr; Domains &rarr;</span>
+    Verify <%= domain.domain %>
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/domains/<%= domain.id %>/verify" class="navBar__link is-active">Verify</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <% if (domain.verified) { %>
+    <div class="fieldSet" style="border:2px solid var(--green);border-radius:4px;padding:20px;text-align:center;">
+      <p class="u-green u-bold" style="font-size:18px;">This domain is verified!</p>
+      <p class="u-margin">Verified on <%= new Date(domain.verified_at).toLocaleString() %></p>
+      <a href="/portal/domains/<%= domain.id %>/setup" class="button">View DNS Setup</a>
+      <a href="/portal/domains" class="button button--neutral">Back to domains</a>
+    </div>
+  <% } else if (method === 'dns') { %>
+    <p class="pageContent__intro u-margin">
+      To verify your ownership of <b><%= domain.domain %></b>, you need to add a TXT record to this domain.
+      The TXT record should point to the domain and include the value shown below.
+    </p>
+
+    <pre class="codeBlock u-margin"><%= verificationString %></pre>
+
+    <p class="pageContent__intro u-margin">
+      Once you've added this, click the button below to verify the presence of this record and
+      verify your domain.
+    </p>
+
+    <div class="buttonSet">
+      <a href="javascript:verifyDNS()" class="button" id="verify-dns-btn">Verify TXT record</a>
+      <a href="/portal/domains" class="button button--neutral">Back to domain list</a>
+    </div>
+
+  <% } else { %>
+    <% if (sentTo) { %>
+      <p class="pageContent__intro u-margin">
+        We've sent an email to <b><%= sentTo %></b>. Please check your e-mail and enter
+        the code you've been sent in the box below.
+      </p>
+      <form action="/api/portal/domains/verify-email" method="POST" id="verify-email-form" onsubmit="return verifyEmail(event)">
+        <input type="hidden" name="id" value="<%= domain.id %>">
+        <input type="hidden" name="email_address" value="<%= sentTo %>">
+        <p class="u-margin">
+          <input type="text" name="code" id="verify-code" class="input input--text" autofocus placeholder="Enter verification code">
+        </p>
+        <div class="buttonSet">
+          <button type="submit" class="button js-form-submit" id="verify-email-btn">Verify this domain</button>
+          <a href="/portal/domains" class="button button--neutral">Back to domain list</a>
+        </div>
+      </form>
+    <% } else { %>
+      <p class="pageContent__intro u-margin">
+        To verify your ownership of <b><%= domain.domain %></b> by e-mail, choose an e-mail address from the list
+        below. We'll then send you an email with a code which you'll need to enter below.
+      </p>
+
+      <form action="/api/portal/domains/send-verification-email" method="POST" id="send-verify-form" onsubmit="return sendVerificationEmail(event)">
+        <input type="hidden" name="id" value="<%= domain.id %>">
+        <p class="u-margin">
+          <select name="email_address" id="verify-email-select" class="input input--select" autofocus>
+            <% verificationEmails.forEach(function(e) { %>
+              <option value="<%= e %>"><%= e %></option>
+            <% }) %>
+          </select>
+        </p>
+        <p class="buttonSet">
+          <button type="submit" class="button">Continue</button>
+          <a href="/portal/domains" class="button button--neutral">Back to domain list</a>
+        </p>
+      </form>
+    <% } %>
+  <% } %>
+</div>
+
+<script>
+async function verifyDNS() {
+  var btn = document.getElementById('verify-dns-btn');
+  btn.textContent = 'Verifying...';
+  btn.disabled = true;
+  try {
+    var r = await fetch('/api/portal/domains/<%= domain.id %>/verify', {
+      method: 'POST',
+      headers: { 'Authorization':'Bearer <%= token %>' }
+    });
+    var data = await r.json();
+    if (data.verified) { location.reload(); }
+    else { alert('Verification failed. Please check the TXT record and try again.'); btn.textContent = 'Verify TXT record'; btn.disabled = false; }
+  } catch(e) { alert('Error: ' + e.message); btn.textContent = 'Verify TXT record'; btn.disabled = false; }
+}
+
+async function sendVerificationEmail(e) {
+  e.preventDefault();
+  var btn = e.target.querySelector('.button');
+  btn.textContent = 'Sending...';
+  btn.disabled = true;
+  try {
+    var r = await fetch('/api/portal/domains/send-verification-email', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify({ id: '<%= domain.id %>', email_address: document.getElementById('verify-email-select').value })
+    });
+    location.reload();
+  } catch(e) { alert('Error: ' + e.message); btn.textContent = 'Continue'; btn.disabled = false; }
+  return false;
+}
+
+async function verifyEmail(e) {
+  e.preventDefault();
+  var btn = document.getElementById('verify-email-btn');
+  btn.textContent = 'Verifying...';
+  btn.disabled = true;
+  try {
+    var r = await fetch('/api/portal/domains/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify({ id: '<%= domain.id %>', code: document.getElementById('verify-code').value, email_address: document.getElementById('verify-email-select') ? document.getElementById('verify-email-select').value : '' })
+    });
+    var data = await r.json();
+    if (data.verified) { location.reload(); }
+    else { alert('Verification failed: ' + (data.message || 'Invalid code')); btn.textContent = 'Verify this domain'; btn.disabled = false; }
+  } catch(e) { alert('Error: ' + e.message); btn.textContent = 'Verify this domain'; btn.disabled = false; }
+  return false;
+}
+</script>

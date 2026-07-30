@@ -32,6 +32,8 @@ html.subPage .subPage__logo { margin-bottom:40px; text-align:center; }
 .u-margin { margin-bottom:25px; }
 .u-margin-half { margin-bottom:10px; }
 .u-center { text-align:center; }
+.u-margin-left { margin-left:5px; }
+.u-hide { display:none !important; }
 .u-green { color:var(--green); }
 .u-orange { color:var(--orange); }
 .u-grey { color:#999; }

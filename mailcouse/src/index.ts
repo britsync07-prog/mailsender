@@ -42,6 +42,25 @@ app.set('layout extractScripts', true);
 app.use(layouts);
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Global EJS helpers
+app.locals.timeAgo = function(date: Date | string | null | undefined): string {
+  if (!date) return 'Never';
+  const d = new Date(date);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHrs = Math.floor(diffMin / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `${diffMonths}mo ago`;
+  return `${Math.floor(diffMonths / 12)}y ago`;
+};
+
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
@@ -205,6 +224,57 @@ app.get('/portal/domains', async (req, res) => {
   } catch { res.redirect('/login'); }
 });
 
+app.get('/portal/domains/add', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    res.render('add-domain', { layout: 'application', title: 'Add Domain', active: 'domains', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/domains/:id/setup', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains/${req.params.id}/setup`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { domain: '', checks: {}, dnsRecords: {}, mxRecords: [], dkimRecordName: '', returnPathDomain: '', returnPathTarget: '', spfHost: '' };
+    const domainResult = await fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const domainData = domainResult.ok ? await domainResult.json() : { domains: [] };
+    const domainObj = domainData.domains?.find((d: any) => d.id === req.params.id) || { id: req.params.id, domain: data.domain, dns_checked_at: null };
+    res.render('domain-setup', { layout: 'application', domain: domainObj, checks: data.checks || {}, dnsRecords: data.dnsRecords || { spf: '', dkim: '', mx: '' }, mxRecords: [(data.dnsRecords?.mx || '').split(' ').filter(Boolean).join(' ')], dkimRecordName: (data.dkimSelector || 'mailcouse') + '._domainkey.' + (data.domain || ''), returnPathDomain: 'bounce.' + (data.domain || ''), returnPathTarget: 'live.noblecircle.online', spfHost: data.spfHost || 'live.noblecircle.online', title: 'DNS Setup', active: 'domains', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/domains/:id/verify', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes, domainListRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains/${req.params.id}/setup`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : {};
+    const domainListData = domainListRes.ok ? await domainListRes.json() : { domains: [] };
+    const domain = domainListData.domains?.find((d: any) => d.id === req.params.id) || { id: req.params.id, domain: data.domain || '', verified: false, verified_at: null };
+    const verificationString = (data.verificationPrefix || 'mailcouse-verification') + ' ' + (data.verificationToken || '').substring(0, 16);
+    const verificationEmails = ['webmaster@' + data.domain, 'postmaster@' + data.domain, 'admin@' + data.domain, 'administrator@' + data.domain, 'hostmaster@' + data.domain];
+    res.render('domain-verify', { layout: 'application', domain, method: 'dns', verificationString, verificationEmails, sentTo: null, title: 'Verify Domain', active: 'domains', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
 app.get('/portal/credentials', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -218,6 +288,22 @@ app.get('/portal/credentials', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { credentials: [] };
     res.render('credentials', { layout: 'application', ...data, title: 'Credentials', active: 'credentials', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/credentials/add', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, domainRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
+    res.render('add-credential', { layout: 'application', domains: domainData.domains || [], title: 'Add Credential', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -553,6 +639,17 @@ app.get('/portal/routes', async (req, res) => {
   } catch { res.redirect('/login'); }
 });
 
+app.get('/portal/routes/add', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    res.render('add-route', { layout: 'application', title: 'Add Route', active: 'routes', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
 app.get('/portal/webhooks', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -569,6 +666,17 @@ app.get('/portal/webhooks', async (req, res) => {
   } catch { res.redirect('/login'); }
 });
 
+app.get('/portal/webhooks/add', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    res.render('add-webhook', { layout: 'application', title: 'Add Webhook', active: 'webhooks', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
 app.get('/portal/track-domains', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -582,6 +690,17 @@ app.get('/portal/track-domains', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { trackDomains: [] };
     res.render('track-domains', { layout: 'application', ...data, title: 'Tracking Domains', active: 'track-domains', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/track-domains/add', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    res.render('add-track-domain', { layout: 'application', title: 'Add Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 

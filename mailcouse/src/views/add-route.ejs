@@ -1,0 +1,117 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Organization &rarr; Routes &rarr;</span>
+    Add route
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routes</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <form action="/api/portal/routes" method="POST" onsubmit="return addRoute(event)">
+    <fieldset class="fieldSet">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="route-name">Route name</label>
+        <div class="fieldSet__input">
+          <input type="text" id="route-name" name="name" class="input input--text" autofocus placeholder="example.com">
+          <p class="fieldSet__text">The domain name to match incoming mail for (use * for all domains).</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="endpoint-type">Endpoint type</label>
+        <div class="fieldSet__input">
+          <select id="endpoint-type" name="endpoint_type" class="input input--select">
+            <option value="HTTP">HTTP Endpoint</option>
+            <option value="SMTP">SMTP Endpoint</option>
+            <option value="Address">Address Endpoint</option>
+          </select>
+        </div>
+      </div>
+    </fieldset>
+
+    <div id="http-config" class="fieldSet">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="http-url">URL</label>
+        <div class="fieldSet__input">
+          <input type="text" id="http-url" name="http_url" class="input input--text" placeholder="https://hooks.example.com/email">
+        </div>
+      </div>
+    </div>
+
+    <div id="smtp-config" class="fieldSet u-hide">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="smtp-host">SMTP Host</label>
+        <div class="fieldSet__input">
+          <input type="text" id="smtp-host" name="smtp_host" class="input input--text" placeholder="smtp.example.com">
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="smtp-port">SMTP Port</label>
+        <div class="fieldSet__input">
+          <input type="number" id="smtp-port" name="smtp_port" class="input input--text" value="587" style="width:100px">
+        </div>
+      </div>
+    </div>
+
+    <div id="address-config" class="fieldSet u-hide">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="address">Address</label>
+        <div class="fieldSet__input">
+          <input type="text" id="address" name="address" class="input input--text" placeholder="user@example.com">
+        </div>
+      </div>
+    </div>
+
+    <p class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit" id="add-btn">Add route</button>
+      <a href="/portal/routes" class="button button--neutral">Cancel</a>
+    </p>
+  </form>
+</div>
+
+<script>
+document.getElementById('endpoint-type').addEventListener('change', function() {
+  document.getElementById('http-config').classList.toggle('u-hide', this.value !== 'HTTP');
+  document.getElementById('smtp-config').classList.toggle('u-hide', this.value !== 'SMTP');
+  document.getElementById('address-config').classList.toggle('u-hide', this.value !== 'Address');
+});
+
+async function addRoute(e) {
+  e.preventDefault();
+  var btn = document.getElementById('add-btn');
+  btn.disabled = true;
+  btn.textContent = 'Adding...';
+
+  var body = {
+    name: document.getElementById('route-name').value.trim(),
+    endpoint_type: document.getElementById('endpoint-type').value
+  };
+
+  if (body.endpoint_type === 'HTTP') body.http_url = document.getElementById('http-url').value.trim();
+  if (body.endpoint_type === 'SMTP') {
+    body.smtp_host = document.getElementById('smtp-host').value.trim();
+    body.smtp_port = document.getElementById('smtp-port').value;
+  }
+  if (body.endpoint_type === 'Address') body.address = document.getElementById('address').value.trim();
+
+  try {
+    var r = await fetch('/api/portal/routes', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify(body)
+    });
+    var data = await r.json();
+    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add route'; return false; }
+    window.location.href = '/portal/routes';
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Add route';
+  }
+  return false;
+}
+</script>

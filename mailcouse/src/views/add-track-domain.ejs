@@ -1,0 +1,71 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Organization &rarr; Tracking Domains &rarr;</span>
+    Add tracking domain
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/track-domains" class="navBar__link">Tracking Domains</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <form action="/api/portal/track-domains" method="POST" onsubmit="return addTrackDomain(event)">
+    <fieldset class="fieldSet">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="domain-name">Domain name</label>
+        <div class="fieldSet__input">
+          <input type="text" id="domain-name" name="name" class="input input--text" autofocus placeholder="track.example.com">
+          <p class="fieldSet__text">The domain you'd like to use for tracking links &amp; images.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="ssl-enabled">SSL</label>
+        <div class="fieldSet__input">
+          <label class="checkbox">
+            <input type="checkbox" id="ssl-enabled" name="ssl_enabled" checked>
+            <span>Use SSL for this tracking domain</span>
+          </label>
+          <p class="fieldSet__text">This should be enabled unless you are testing or using this domain behind a load balancer.</p>
+        </div>
+      </div>
+    </fieldset>
+    <p class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit" id="add-btn">Add tracking domain</button>
+      <a href="/portal/track-domains" class="button button--neutral">Cancel</a>
+    </p>
+  </form>
+</div>
+
+<script>
+async function addTrackDomain(e) {
+  e.preventDefault();
+  var domain = document.getElementById('domain-name').value.trim();
+  if (!domain) { alert('Enter a domain name'); return false; }
+
+  var btn = document.getElementById('add-btn');
+  btn.disabled = true;
+  btn.textContent = 'Adding...';
+
+  try {
+    var r = await fetch('/api/portal/track-domains', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify({
+        domain: domain,
+        ssl_enabled: document.getElementById('ssl-enabled').checked
+      })
+    });
+    var data = await r.json();
+    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add tracking domain'; return false; }
+    window.location.href = '/portal/track-domains';
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Add tracking domain';
+  }
+  return false;
+}
+</script>

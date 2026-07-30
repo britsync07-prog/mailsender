@@ -405,6 +405,98 @@ router.post('/domains/:id/verify-email', async (req: Request, res: Response) => 
   }
 });
 
+router.post('/domains/check', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.body;
+    const orgId = req.user!.orgId!;
+    const domainResult = await query(
+      'SELECT id, domain, dkim_selector FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      [id, orgId]
+    );
+    if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
+
+    const { domain, dkim_selector } = domainResult.rows[0];
+    const dnsObj = require('dns').promises;
+    const statuses: Record<string, string> = {};
+
+    try {
+      const txt = await dnsObj.resolveTxt(domain);
+      statuses.spf = txt.flat().some((r: string) => r.startsWith('v=spf1')) ? 'ok' : 'missing';
+    } catch { statuses.spf = 'missing'; }
+
+    try {
+      if (dkim_selector) {
+        const dkimTxt = await dnsObj.resolveTxt(`${dkim_selector}._domainkey.${domain}`);
+        statuses.dkim = dkimTxt.length > 0 ? 'ok' : 'missing';
+      } else {
+        statuses.dkim = 'missing';
+      }
+    } catch { statuses.dkim = 'missing'; }
+
+    try {
+      const mx = await dnsObj.resolveMx(domain);
+      statuses.mx = mx.length > 0 ? 'ok' : 'missing';
+    } catch { statuses.mx = 'missing'; }
+
+    try {
+      const dmarc = await dnsObj.resolveTxt(`_dmarc.${domain}`);
+      statuses.return_path = dmarc.flat().some((r: string) => r.startsWith('v=DMARC1')) ? 'ok' : 'missing';
+    } catch { statuses.return_path = 'missing'; }
+
+    await query(
+      `UPDATE customer_domains SET spf_status = $1, dkim_status = $2, mx_status = $3, return_path_status = $4, dns_checked_at = NOW() WHERE id = $5`,
+      [statuses.spf, statuses.dkim, statuses.mx, statuses.return_path, id]
+    );
+
+    res.json({ checks: statuses });
+  } catch {
+    res.status(500).json({ error: 'DNS check failed' });
+  }
+});
+
+router.post('/domains/send-verification-email', async (req: Request, res: Response) => {
+  try {
+    const { id, email_address } = req.body;
+    const domainResult = await query(
+      'SELECT id, domain, verification_token FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      [id, req.user!.orgId!]
+    );
+    if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
+    const { domain, verification_token } = domainResult.rows[0];
+    const code = verification_token.substring(0, 6);
+    const msgId = `<${crypto.randomUUID()}@${domain}>`;
+    await query(
+      `INSERT INTO sent_messages (organization_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'outgoing')`,
+      [req.user!.orgId!, `noreply@${domain}`, email_address, 'Domain Verification Code',
+       `Your verification code is: ${code}\n\nPlease enter this code to verify your domain.`,
+       '', 100, 'sent', msgId]
+    );
+    res.json({ sent: true, email: email_address, code });
+  } catch {
+    res.status(500).json({ error: 'Failed to send verification email' });
+  }
+});
+
+router.post('/domains/verify-email', async (req: Request, res: Response) => {
+  try {
+    const { id, code, email_address } = req.body;
+    const domainResult = await query(
+      'SELECT id, verification_token FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      [id, req.user!.orgId!]
+    );
+    if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
+    const { verification_token } = domainResult.rows[0];
+    if (code === verification_token.substring(0, 6)) {
+      await query('UPDATE customer_domains SET verified = true, verified_at = NOW() WHERE id = $1', [id]);
+      return res.json({ verified: true });
+    }
+    res.json({ verified: false, message: 'Invalid verification code' });
+  } catch {
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
 router.post('/domains', async (req: Request, res: Response) => {
   try {
     const { domain } = req.body;
@@ -501,7 +593,11 @@ router.get('/domains/:id/verify', async (req: Request, res: Response) => {
       );
     }
 
-    res.json({ domain, verified: allOk, checks: statuses });
+      await query(
+        'UPDATE customer_domains SET dns_checked_at = NOW() WHERE id = $1',
+        [req.params.id]
+      );
+      res.json({ domain, verified: allOk, checks: statuses });
   } catch (err) {
     console.error('Verify domain error:', err);
     res.status(500).json({ error: 'Failed to verify domain' });
@@ -541,18 +637,19 @@ router.get('/credentials', async (req: Request, res: Response) => {
 
 router.post('/credentials', async (req: Request, res: Response) => {
   try {
-    const { name, domainId } = req.body;
+    const { name, domainId, type } = req.body;
     if (!name) return res.status(400).json({ error: 'Credential name required' });
 
     const username = `u_${crypto.randomBytes(12).toString('hex')}`;
     const password = crypto.randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
     const hash = await require('bcryptjs').hash(password, 10);
+    const credType = (type || 'SMTP').toLowerCase();
 
     const result = await query<{ id: string }>(
       `INSERT INTO smtp_credentials (organization_id, customer_domain_id, name, username, password_hash, type)
-       VALUES ($1, $2, $3, $4, $5, 'smtp')
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
-      [req.user!.orgId!, domainId || null, name, username, hash]
+      [req.user!.orgId!, domainId || null, name, username, hash, credType]
     );
 
     res.status(201).json({
@@ -560,11 +657,24 @@ router.post('/credentials', async (req: Request, res: Response) => {
       name,
       username,
       password,
-      type: 'smtp',
+      type: credType,
     });
   } catch (err) {
     console.error('Create credential error:', err);
     res.status(500).json({ error: 'Failed to create credential' });
+  }
+});
+
+router.get('/credentials/:id/show', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT id, name, username, password FROM smtp_credentials WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Credential not found' });
+    res.json(result.rows[0]);
+  } catch {
+    res.status(500).json({ error: 'Failed to load credential' });
   }
 });
 
@@ -885,11 +995,16 @@ router.get('/routes', async (req: Request, res: Response) => {
 
 router.post('/routes', async (req: Request, res: Response) => {
   try {
-    const { name, domain, matchType, matchValue, actionType, actionValue, priority } = req.body;
+    const { name, endpoint_type, http_url, smtp_host, smtp_port, address } = req.body;
+    let actionValue = '';
+    let actionType = 'webhook';
+    if (endpoint_type === 'HTTP' && http_url) { actionType = 'http'; actionValue = http_url; }
+    else if (endpoint_type === 'SMTP' && smtp_host) { actionType = 'smtp'; actionValue = `${smtp_host}:${smtp_port || 587}`; }
+    else if (endpoint_type === 'Address' && address) { actionType = 'address'; actionValue = address; }
     const result = await query<{ id: string }>(
       `INSERT INTO routes (organization_id, name, domain, match_type, match_value, action_type, action_value, priority)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [req.user!.orgId!, name || 'Unnamed Route', domain || null, matchType || 'catch_all', matchValue || '', actionType || 'webhook', actionValue || '', priority || 10]
+      [req.user!.orgId!, name || 'Unnamed Route', null, 'catch_all', '', actionType, actionValue, 10]
     );
     res.status(201).json({ id: result.rows[0].id });
   } catch {
@@ -922,15 +1037,30 @@ router.get('/webhooks', async (req: Request, res: Response) => {
 
 router.post('/webhooks', async (req: Request, res: Response) => {
   try {
-    const { name, endpointUrl, events } = req.body;
-    if (!endpointUrl) return res.status(400).json({ error: 'Endpoint URL required' });
+    const { url, http_method, events } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL required' });
     const result = await query<{ id: string }>(
-      `INSERT INTO webhooks (organization_id, name, endpoint_url, events) VALUES ($1, $2, $3, $4) RETURNING id`,
-      [req.user!.orgId!, name || 'Unnamed Webhook', endpointUrl, events || []]
+      `INSERT INTO webhooks (organization_id, name, url, http_method, events, enabled)
+       VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
+      [req.user!.orgId!, url, url, http_method || 'POST', events || ['Send', 'Open', 'Click', 'Bounce', 'Complaint']]
     );
     res.status(201).json({ id: result.rows[0].id });
   } catch {
     res.status(500).json({ error: 'Failed to create webhook' });
+  }
+});
+
+router.post('/webhooks/:id/toggle', async (req: Request, res: Response) => {
+  try {
+    const wh = await query<{ enabled: boolean }>(
+      'SELECT enabled FROM webhooks WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (wh.rows.length === 0) return res.status(404).json({ error: 'Webhook not found' });
+    await query('UPDATE webhooks SET enabled = $1 WHERE id = $2', [!wh.rows[0].enabled, req.params.id]);
+    res.json({ enabled: !wh.rows[0].enabled });
+  } catch {
+    res.status(500).json({ error: 'Failed to toggle webhook' });
   }
 });
 
@@ -959,13 +1089,13 @@ router.get('/track-domains', async (req: Request, res: Response) => {
 
 router.post('/track-domains', async (req: Request, res: Response) => {
   try {
-    const { domain } = req.body;
+    const { domain, ssl_enabled } = req.body;
     if (!domain) return res.status(400).json({ error: 'Domain required' });
     const result = await query<{ id: string }>(
-      'INSERT INTO track_domains (organization_id, domain) VALUES ($1, $2) RETURNING id',
-      [req.user!.orgId!, domain.toLowerCase()]
+      'INSERT INTO track_domains (organization_id, domain, ssl_enabled) VALUES ($1, $2, $3) RETURNING id',
+      [req.user!.orgId!, domain.toLowerCase(), ssl_enabled !== false]
     );
-    res.status(201).json({ id: result.rows[0].id, domain: domain.toLowerCase() });
+    res.status(201).json({ id: result.rows[0].id, domain: domain.toLowerCase(), ssl_enabled: ssl_enabled !== false });
   } catch {
     res.status(500).json({ error: 'Failed to add track domain' });
   }
@@ -1059,6 +1189,20 @@ router.get('/pool', async (req: Request, res: Response) => {
     res.json({ pool: result.rows });
   } catch {
     res.status(500).json({ error: 'Failed to list pool' });
+  }
+});
+
+// ─── Organization Update ──────────────────────────────────
+
+router.put('/settings', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (name) {
+      await query('UPDATE organizations SET name = $1 WHERE id = $2', [name, req.user!.orgId!]);
+    }
+    res.json({ message: 'Settings saved' });
+  } catch {
+    res.status(500).json({ error: 'Failed to save settings' });
   }
 });
 

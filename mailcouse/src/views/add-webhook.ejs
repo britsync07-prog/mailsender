@@ -1,0 +1,85 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Organization &rarr; Webhooks &rarr;</span>
+    Add webhook
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <form action="/api/portal/webhooks" method="POST" onsubmit="return addWebhook(event)">
+    <fieldset class="fieldSet">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="webhook-url">URL</label>
+        <div class="fieldSet__input">
+          <input type="text" id="webhook-url" name="url" class="input input--text" autofocus placeholder="https://hooks.example.com/email">
+          <p class="fieldSet__text">The URL we'll send the request to.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="http-method">HTTP method</label>
+        <div class="fieldSet__input">
+          <select id="http-method" name="http_method" class="input input--select" style="width:120px">
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+          </select>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Events</label>
+        <div class="fieldSet__input">
+          <label class="checkbox"><input type="checkbox" name="events" value="Send" checked> Send</label>
+          <label class="checkbox"><input type="checkbox" name="events" value="Open" checked> Open</label>
+          <label class="checkbox"><input type="checkbox" name="events" value="Click" checked> Click</label>
+          <label class="checkbox"><input type="checkbox" name="events" value="Bounce" checked> Bounce</label>
+          <label class="checkbox"><input type="checkbox" name="events" value="Complaint" checked> Complaint</label>
+          <label class="checkbox"><input type="checkbox" name="events" value="Hold"> Hold</label>
+          <label class="checkbox"><input type="checkbox" name="events" value="Unsubscribe"> Unsubscribe</label>
+          <label class="checkbox"><input type="checkbox" name="events" value="Reject"> Reject</label>
+          <p class="fieldSet__text">The events you'd like to be notified of.</p>
+        </div>
+      </div>
+    </fieldset>
+    <p class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit" id="add-btn">Add webhook</button>
+      <a href="/portal/webhooks" class="button button--neutral">Cancel</a>
+    </p>
+  </form>
+</div>
+
+<script>
+async function addWebhook(e) {
+  e.preventDefault();
+  var btn = document.getElementById('add-btn');
+  btn.disabled = true;
+  btn.textContent = 'Adding...';
+
+  var events = [];
+  document.querySelectorAll('input[name="events"]:checked').forEach(function(cb) { events.push(cb.value); });
+
+  try {
+    var r = await fetch('/api/portal/webhooks', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify({
+        url: document.getElementById('webhook-url').value.trim(),
+        http_method: document.getElementById('http-method').value,
+        events: events
+      })
+    });
+    var data = await r.json();
+    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add webhook'; return false; }
+    window.location.href = '/portal/webhooks';
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Add webhook';
+  }
+  return false;
+}
+</script>

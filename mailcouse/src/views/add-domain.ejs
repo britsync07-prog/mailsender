@@ -1,0 +1,91 @@
+<div class="pageHeader">
+  <h1 class="pageHeader__title">
+    <span class="pageHeader__titlePrevious">Organization &rarr; Domains &rarr;</span>
+    Add new domain
+  </h1>
+</div>
+
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+  </ul>
+</nav>
+
+<div class="pageContent pageContent--compact">
+  <form action="/api/portal/domains" method="POST" id="add-domain-form" onsubmit="return addDomain(event)">
+    <fieldset class="fieldSet">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="domain-name">Domain name</label>
+        <div class="fieldSet__input">
+          <input type="text" id="domain-name" name="name" class="input input--text" autofocus placeholder="example.com">
+          <p class="fieldSet__text">The domain you wish to send &amp; receive e-mail from.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="verification-method">Verification method</label>
+        <div class="fieldSet__input">
+          <select id="verification-method" name="verification_method" class="input input--select">
+            <option value="dns">DNS</option>
+            <option value="email">E-Mail</option>
+          </select>
+          <p class="fieldSet__text">
+            Choose how you'd like to verify your ownership of this domain. If you choose <b>E-Mail</b> we can send you
+            an email with a code which you'll need to enter - you can choose from a set of pre-defined addresses for
+            the domain. Using <b>DNS</b> you'll need to add a TXT record on this domain using your DNS provider.
+          </p>
+        </div>
+      </div>
+    </fieldset>
+    <div id="domain-dns-records" style="display:none" class="u-margin">
+      <div style="background:#fafafa;border:1px solid #e4e8ef;border-radius:3px;padding:16px;margin-top:10px;">
+        <p style="font-weight:600;margin-bottom:10px;">DNS Records</p>
+        <div class="formBlock"><label>SPF Record (TXT)</label><pre class="codeBlock" id="dns-spf"></pre></div>
+        <div class="formBlock"><label>DKIM Record (TXT)</label><pre class="codeBlock" id="dns-dkim"></pre></div>
+        <div class="formBlock"><label>MX Record</label><pre class="codeBlock" id="dns-mx"></pre></div>
+        <div class="formBlock" style="margin-bottom:0"><label>Verification (TXT)</label><pre class="codeBlock" id="dns-verify"></pre></div>
+        <p style="color:#999;font-size:12px;margin-top:10px;">Add these DNS records to your domain provider, then click "Done" to continue.</p>
+      </div>
+    </div>
+    <p class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit" id="add-domain-btn">Add Domain</button>
+      <a href="/portal/domains" class="button button--neutral">Cancel</a>
+    </p>
+  </form>
+</div>
+
+<script>
+async function addDomain(e) {
+  e.preventDefault();
+  var domain = document.getElementById('domain-name').value.trim();
+  if (!domain) { alert('Enter a domain name'); return false; }
+
+  var btn = document.getElementById('add-domain-btn');
+  btn.disabled = true;
+  btn.textContent = 'Adding...';
+
+  try {
+    var r = await fetch('/api/portal/domains', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
+      body: JSON.stringify({ domain: domain, verification_method: document.getElementById('verification-method').value })
+    });
+    var data = await r.json();
+
+    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add Domain'; return false; }
+
+    document.getElementById('dns-spf').textContent = data.dnsRecords.spf;
+    document.getElementById('dns-dkim').textContent = data.dnsRecords.dkim;
+    document.getElementById('dns-mx').textContent = data.dnsRecords.mx;
+    document.getElementById('dns-verify').textContent = data.verificationPrefix + ' ' + data.verificationToken;
+    document.getElementById('domain-dns-records').style.display = 'block';
+    document.getElementById('domain-name').disabled = true;
+    btn.textContent = 'Done';
+    btn.onclick = function() { window.location.href = '/portal/domains/' + data.id + '/setup'; };
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Add Domain';
+  }
+  return false;
+}
+</script>

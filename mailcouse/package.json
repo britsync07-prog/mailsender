@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc && cp -r src/views dist/views && cp -r src/public dist/public && cp src/db/schema.sql dist/db/schema.sql",
+    "build": "tsc && cp -r src/views/. dist/views/ && cp -r src/public/. dist/public/ && cp src/db/schema.sql dist/db/schema.sql",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "test": "jest --coverage",
