@@ -66,12 +66,19 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       [orgId]
     );
 
-    const serverResult = await query<{ mode: string; suspended_at: Date | null; send_limit: number | null }>(
-      'SELECT mode, suspended_at, send_limit FROM servers WHERE organization_id = $1',
-      [orgId]
-    );
-
-    const server = serverResult.rows[0];
+    let server: { mode: string; suspended: boolean; send_limit: number | null } = { mode: 'live', suspended: false, send_limit: null };
+    try {
+      const serverResult = await query<{ mode: string; suspended_at: Date | null; send_limit: number | null }>(
+        'SELECT mode, suspended_at, send_limit FROM servers WHERE organization_id = $1',
+        [orgId]
+      );
+      if (serverResult.rows[0]) {
+        const s = serverResult.rows[0];
+        server = { mode: s.mode, suspended: !!s.suspended_at, send_limit: s.send_limit };
+      }
+    } catch {
+      // servers table may lack these columns in older schemas — use defaults
+    }
 
     res.json({
       stats: {
@@ -82,7 +89,7 @@ router.get('/dashboard', async (req: Request, res: Response) => {
         queued: parseInt(queuedCount.rows[0].cnt),
         bounces: parseInt(bounceCount.rows[0].cnt),
         todaySent: parseInt(todaySent.rows[0]?.cnt || '0'),
-        sendLimit: server?.send_limit || null,
+        sendLimit: server.send_limit,
         graphOutgoing: dailyStats.rows.map(r => r.sent).reverse().join(','),
         graphIncoming: dailyStats.rows.map(r => r.bounced).reverse().join(','),
         dailyAverage: Math.round(
@@ -90,10 +97,7 @@ router.get('/dashboard', async (req: Request, res: Response) => {
         ),
       },
       recentMessages: recentMessages.rows,
-      server: server ? {
-        mode: server.mode,
-        suspended: !!server.suspended_at,
-      } : { mode: 'live', suspended: false },
+      server: { mode: server.mode, suspended: server.suspended },
     });
   } catch (err) {
     console.error('Dashboard error:', err);

@@ -203,7 +203,7 @@ app.get('/portal/dashboard', async (req, res) => {
     ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
-    const data = dataRes.ok ? await dataRes.json() : { stats: { domains: 0, credentials: 0, messagesSent: 0 }, recentMessages: [] };
+    const data = dataRes.ok ? await dataRes.json() : { stats: { domains: 0, credentials: 0, messagesSent: 0, held: 0, queued: 0, bounces: 0, todaySent: 0, sendLimit: null }, recentMessages: [], server: { mode: 'live', suspended: false } };
     res.render('dashboard', { layout: 'application', ...data, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });

@@ -86,6 +86,24 @@ export async function transaction<T>(
   }
 }
 
+async function runMigrations(): Promise<void> {
+  const migrations = [
+    `ALTER TABLE servers ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMP`,
+    `ALTER TABLE servers ADD COLUMN IF NOT EXISTS suspension_reason TEXT`,
+    `ALTER TABLE servers ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'live'`,
+    `ALTER TABLE servers ADD COLUMN IF NOT EXISTS send_limit INTEGER`,
+  ];
+  const client = await getPool().connect();
+  try {
+    for (const sql of migrations) {
+      await client.query(sql);
+    }
+    console.log('Database migrations applied successfully');
+  } finally {
+    client.release();
+  }
+}
+
 export async function initializeDatabase(): Promise<void> {
   const fs = require('fs');
   const path = require('path');
@@ -99,6 +117,7 @@ export async function initializeDatabase(): Promise<void> {
   } finally {
     client.release();
   }
+  await runMigrations();
 }
 
 export async function checkDatabaseHealth(): Promise<{
