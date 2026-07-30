@@ -1,18 +1,13 @@
-import { Pool } from 'pg';
+import { query } from '../db/connection';
 import * as nodemailer from 'nodemailer';
 import * as dns from 'dns';
 import { randomUUID } from 'crypto';
-
-const pool = new Pool({
-  host: 'localhost', port: 5433, database: 'mailcouse',
-  user: 'mailcouse', password: 'postgres', max: 3,
-});
 
 export async function sendCrossDomainWarmup(): Promise<{ sent: number; errors: number }> {
   let sent = 0, errors = 0;
 
   try {
-    const subsA = await pool.query(
+    const subsA = await query(
       `SELECT s.id, s.subdomain, d.domain as root_domain, d.id as domain_id
        FROM subdomains s JOIN domains d ON d.id = s.domain_id
        WHERE s.status = 'active' AND s.warmup_complete = false
@@ -22,7 +17,7 @@ export async function sendCrossDomainWarmup(): Promise<{ sent: number; errors: n
     );
     if (subsA.rows.length === 0) return { sent, errors };
 
-    const subsB = await pool.query(
+    const subsB = await query(
       `SELECT s.id, s.subdomain, d.domain as root_domain, d.id as domain_id
        FROM subdomains s JOIN domains d ON d.id = s.domain_id
        WHERE s.status = 'active' AND s.warmup_complete = false
@@ -37,7 +32,7 @@ export async function sendCrossDomainWarmup(): Promise<{ sent: number; errors: n
       for (const toSub of subsB.rows) {
         if (sent >= 50) break;
 
-        const partner = await pool.query(
+        const partner = await query(
           `SELECT id, email FROM warmup_partners
            WHERE domain_id = $1 AND status = 'active'
            ORDER BY RANDOM() LIMIT 1`,
@@ -71,12 +66,12 @@ export async function sendCrossDomainWarmup(): Promise<{ sent: number; errors: n
           });
           transporter.close();
 
-          await pool.query(
+          await query(
             `INSERT INTO warmup_conversations (partner_id, subdomain_id, direction, subject, message_id, sent_at, delivered)
              VALUES ($1, (SELECT id FROM subdomains WHERE subdomain = $2), 'outbound', $3, $4, NOW(), true)`,
             [partner.rows[0].id, fromSub.subdomain, `Re: ${convId.slice(0, 12)}`, convId]
           );
-          await pool.query(
+          await query(
             'UPDATE subdomains SET emails_sent_today = emails_sent_today + 1 WHERE id = $1',
             [fromSub.id]
           );
@@ -94,7 +89,7 @@ export async function sendCrossDomainWarmup(): Promise<{ sent: number; errors: n
 export async function progressWarmup(): Promise<{ activated: number; extended: number }> {
   let activated = 0, extended = 0;
   try {
-    const warming = await pool.query(
+    const warming = await query(
       `SELECT id, warmup_started_at, daily_limit, bounce_rate, complaint_count
        FROM subdomains WHERE status = 'active' AND warmup_complete = false`
     );
@@ -105,16 +100,16 @@ export async function progressWarmup(): Promise<{ activated: number; extended: n
       const maxLimit = [3, 5, 10, 25][Math.min(weeksActive, 3)];
       const currentLimit = parseInt(sub.daily_limit) || 3;
       if (currentLimit < maxLimit) {
-        await pool.query('UPDATE subdomains SET daily_limit = $1 WHERE id = $2', [Math.min(currentLimit + 2, maxLimit), sub.id]);
+        await query('UPDATE subdomains SET daily_limit = $1 WHERE id = $2', [Math.min(currentLimit + 2, maxLimit), sub.id]);
       }
       if (weeksActive >= 4) {
         const bounceRate = parseFloat(sub.bounce_rate) || 0;
         const complaints = parseInt(sub.complaint_count) || 0;
         if (bounceRate <= 0.05 && complaints === 0) {
-          await pool.query(`UPDATE subdomains SET warmup_complete = true, daily_limit = 300 WHERE id = $1`, [sub.id]);
+          await query(`UPDATE subdomains SET warmup_complete = true, daily_limit = 300 WHERE id = $1`, [sub.id]);
           activated++;
         } else {
-          await pool.query('UPDATE subdomains SET warmup_started_at = warmup_started_at + INTERVAL \'1 week\' WHERE id = $1', [sub.id]);
+          await query('UPDATE subdomains SET warmup_started_at = warmup_started_at + INTERVAL \'1 week\' WHERE id = $1', [sub.id]);
           extended++;
         }
       }
@@ -126,7 +121,7 @@ export async function progressWarmup(): Promise<{ activated: number; extended: n
 export async function generateWarmupEngagement(): Promise<{ opens: number; replies: number }> {
   let opens = 0, replies = 0;
   try {
-    const stale = await pool.query(
+    const stale = await query(
       `SELECT wc.id, wc.message_id, wp.email, wp.id as partner_id, s.subdomain, s.id as subdomain_id
        FROM warmup_conversations wc JOIN warmup_partners wp ON wp.id = wc.partner_id
        JOIN subdomains s ON s.id = wc.subdomain_id
@@ -137,7 +132,7 @@ export async function generateWarmupEngagement(): Promise<{ opens: number; repli
     );
     for (const conv of stale.rows) {
       if (!conv.opened_at && Math.random() < 0.7) {
-        await pool.query('UPDATE warmup_conversations SET opened_at = NOW() - INTERVAL \'1 minute\' * floor(random() * 5 + 1) WHERE id = $1', [conv.id]);
+        await query('UPDATE warmup_conversations SET opened_at = NOW() - INTERVAL \'1 minute\' * floor(random() * 5 + 1) WHERE id = $1', [conv.id]);
         opens++;
       }
       if (!conv.replied_at && Math.random() < 0.25) {
@@ -149,8 +144,8 @@ export async function generateWarmupEngagement(): Promise<{ opens: number; repli
           fs.mkdirSync(dir, { recursive: true });
           fs.writeFileSync(path.join(dir, `${replyId}.eml`), `From: ${conv.email}\nTo: ${conv.subdomain}\nSubject: Re: your message\n\nThanks!\n`);
         } catch {}
-        await pool.query('UPDATE warmup_conversations SET replied_at = NOW() - INTERVAL \'1 hour\' * floor(random() * 3 + 1) WHERE id = $1', [conv.id]);
-        await pool.query(`INSERT INTO warmup_conversations (partner_id, subdomain_id, direction, subject, message_id, sent_at, delivered) VALUES ($1, $2, 'inbound', $3, $4, NOW(), true)`, [conv.partner_id, conv.subdomain_id, `Re: your message`, replyId]);
+        await query('UPDATE warmup_conversations SET replied_at = NOW() - INTERVAL \'1 hour\' * floor(random() * 3 + 1) WHERE id = $1', [conv.id]);
+        await query(`INSERT INTO warmup_conversations (partner_id, subdomain_id, direction, subject, message_id, sent_at, delivered) VALUES ($1, $2, 'inbound', $3, $4, NOW(), true)`, [conv.partner_id, conv.subdomain_id, `Re: your message`, replyId]);
         replies++;
       }
     }
@@ -159,5 +154,5 @@ export async function generateWarmupEngagement(): Promise<{ opens: number; repli
 }
 
 export async function resetWarmupCounters(): Promise<void> {
-  await pool.query('UPDATE subdomains SET emails_sent_today = 0 WHERE status IN (\'warming\', \'active\')');
+  await query('UPDATE subdomains SET emails_sent_today = 0 WHERE status IN (\'warming\', \'active\')');
 }

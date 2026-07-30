@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { Pool } from 'pg';
 import * as dns from 'dns';
 import * as nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
+import { query } from '../db/connection';
 import { getDKIMPrivateKey } from '../dkim/key-store';
 import { checkWarmupGate } from '../warmup/gate';
 
@@ -16,15 +16,9 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'to, subject, and body required' });
     }
 
-    const pool = new Pool({
-      host: 'localhost', port: 5433, database: 'mailcouse',
-      user: 'mailcouse', password: 'postgres',
-      max: 2, connectionTimeoutMillis: 5000,
-    });
-
     const validTier = ['mass_mail', 'personal', 'transactional'].includes(tier) ? tier : 'mass_mail';
 
-    const dbResult = await pool.query(
+    const dbResult = await query(
       `SELECT s.id, s.subdomain, s.sender_name, d.domain as root_domain
        FROM subdomains s JOIN domains d ON s.domain_id = d.id
        WHERE s.status = 'active' AND s.tier = $1 AND s.emails_sent_today < s.daily_limit
@@ -33,7 +27,6 @@ router.post('/', async (req: Request, res: Response) => {
     );
 
     if (dbResult.rows.length === 0) {
-      await pool.end();
       return res.status(503).json({ error: 'No available subdomains for tier ' + validTier });
     }
 
@@ -41,7 +34,6 @@ router.post('/', async (req: Request, res: Response) => {
 
     const gate = await checkWarmupGate(sub.id);
     if (!gate.passed) {
-      await pool.end();
       return res.status(503).json({ error: 'Subdomain not through warmup', reason: gate.reason });
     }
 
@@ -54,24 +46,17 @@ router.post('/', async (req: Request, res: Response) => {
 
     const mxRecords = await dns.promises.resolveMx(to.split('@')[1]);
     if (!mxRecords || mxRecords.length === 0) {
-      await pool.end();
       return res.status(502).json({ error: 'No MX records' });
     }
     mxRecords.sort((a, b) => a.priority - b.priority);
 
     const keyData = await getDKIMPrivateKey(sub.id);
 
-    const suppressPool = new Pool({
-      host: 'localhost', port: 5433, database: 'mailcouse',
-      user: 'mailcouse', password: 'postgres', max: 1,
-    });
-    const supCheck = await suppressPool.query(
+    const supCheck = await query(
       'SELECT reason FROM suppression_list WHERE email = $1',
       [to.toLowerCase()]
     );
-    await suppressPool.end();
     if (supCheck.rows.length > 0) {
-      await pool.end();
       return res.status(403).json({
         success: false, error: `Recipient suppressed: ${supCheck.rows[0].reason}`,
         from: headerFrom, envelope_from: envelopeFrom, subdomain: sub.subdomain,
@@ -95,28 +80,25 @@ router.post('/', async (req: Request, res: Response) => {
           } : undefined,
         });
 
-        const leadPool = new Pool({
-          host: 'localhost', port: 5433, database: 'mailcouse',
-          user: 'mailcouse', password: 'postgres', max: 1,
-        });
-        const leadRes = await leadPool.query(
+        const leadRes = await query(
           `INSERT INTO leads (email, first_name) VALUES ($1, $2)
            ON CONFLICT (email) DO UPDATE SET send_count = leads.send_count + 1, last_sent_at = NOW()
            RETURNING id`,
           [to.toLowerCase(), (req.body.to_name || '').split(' ')[0]]
         );
         const leadId = leadRes.rows[0].id;
-        await leadPool.query(
+
+        await query(
           `INSERT INTO sent_messages
            (organization_id, subdomain_id, mail_from, rcpt_to, subject, message_id, status, sent_at)
            VALUES ((SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1), $1, $2, $3, $4, $5, 'sent', NOW())`,
           [sub.id, envelopeFrom, to.toLowerCase(), subject, msgId]
         );
-        await leadPool.query(
+
+        await query(
           'UPDATE leads SET send_count = send_count + 1 WHERE id = $1',
           [leadId]
         );
-        await leadPool.end();
 
         const trackingUrl = `http://${req.hostname}`;
         const trackerGif = `${trackingUrl}/track/open/${leadId}.png`;
@@ -146,11 +128,10 @@ ${body.replace(/\n/g, '<br>\n')}
 
         transporter.close();
 
-        await pool.query(
+        await query(
           `UPDATE subdomains SET emails_sent_today = emails_sent_today + 1, total_sent = total_sent + 1 WHERE id = $1`,
           [sub.id]
         );
-        await pool.end();
 
         return res.json({
           success: true, response_message: info.response,
@@ -165,7 +146,6 @@ ${body.replace(/\n/g, '<br>\n')}
       }
     }
 
-    await pool.end();
     return res.status(502).json({
       success: false, error: lastError || 'All MX servers failed',
       from: headerFrom, envelope_from: envelopeFrom, subdomain: sub.subdomain,

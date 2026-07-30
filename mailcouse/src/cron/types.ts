@@ -15,7 +15,8 @@ export type CronJobName =
   | 'daily_report'
   | 'warmup_send'
   | 'warmup_progression'
-  | 'warmup_reset';
+  | 'warmup_reset'
+  | 'customer_dns_check';
 
 export interface CronJobConfig {
   name: CronJobName;
@@ -68,4 +69,5 @@ export const CRON_SCHEDULES: CronJobConfig[] = [
   { name: 'warmup_send', schedule: '0 */1 * * *', description: 'Send cross-domain warmup emails', enabled: true },
   { name: 'warmup_progression', schedule: '0 6 * * *', description: 'Progress warmup phase for subdomains', enabled: true },
   { name: 'warmup_reset', schedule: '0 0 * * *', description: 'Reset warmup daily counters', enabled: true },
+  { name: 'customer_dns_check', schedule: '0 */1 * * *', description: 'Auto-check customer domain DNS records', enabled: true },
 ];

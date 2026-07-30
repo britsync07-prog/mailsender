@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS subdomains (
     bounce_count INTEGER NOT NULL DEFAULT 0,
     bounce_rate DECIMAL(6,4) DEFAULT 0,
     engagement_score INTEGER NOT NULL DEFAULT 0,
+    tier VARCHAR(20) NOT NULL DEFAULT 'mass_mail',
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -488,6 +489,7 @@ CREATE TABLE IF NOT EXISTS customer_domains (
     dkim_status VARCHAR(20) DEFAULT 'pending',
     mx_status VARCHAR(20) DEFAULT 'pending',
     return_path_status VARCHAR(20) DEFAULT 'pending',
+    dns_checked_at TIMESTAMP,
     outgoing BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE(domain)
@@ -505,6 +507,7 @@ CREATE TABLE IF NOT EXISTS smtp_credentials (
     password_hash VARCHAR(255) NOT NULL,
     type VARCHAR(20) NOT NULL DEFAULT 'smtp',
     hold BOOLEAN NOT NULL DEFAULT false,
+    tier VARCHAR(20) NOT NULL DEFAULT 'mass_mail',
     last_used_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -692,3 +695,48 @@ CREATE TABLE IF NOT EXISTS subdomain_pool_tracking (
 
 CREATE INDEX IF NOT EXISTS idx_pool_tracking_subdomain ON subdomain_pool_tracking(subdomain_id);
 CREATE INDEX IF NOT EXISTS idx_pool_tracking_org ON subdomain_pool_tracking(organization_id);
+
+-- ============================================================
+-- WARMUP PARTNERS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS warmup_partners (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    domain_id UUID NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+    email VARCHAR(320) NOT NULL UNIQUE,
+    mailbox_name VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_warmup_partners_domain ON warmup_partners(domain_id);
+CREATE INDEX IF NOT EXISTS idx_warmup_partners_email ON warmup_partners(email);
+CREATE INDEX IF NOT EXISTS idx_warmup_partners_status ON warmup_partners(status);
+
+-- ============================================================
+-- WARMUP CONVERSATIONS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS warmup_conversations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    partner_id UUID NOT NULL REFERENCES warmup_partners(id) ON DELETE CASCADE,
+    subdomain_id UUID REFERENCES subdomains(id) ON DELETE SET NULL,
+    direction VARCHAR(10) NOT NULL DEFAULT 'outbound',
+    subject TEXT,
+    message_id VARCHAR(255),
+    sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    delivered BOOLEAN NOT NULL DEFAULT false,
+    opened_at TIMESTAMP,
+    replied_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_warmup_conv_partner ON warmup_conversations(partner_id);
+CREATE INDEX IF NOT EXISTS idx_warmup_conv_subdomain ON warmup_conversations(subdomain_id);
+CREATE INDEX IF NOT EXISTS idx_warmup_conv_direction ON warmup_conversations(direction);
+CREATE INDEX IF NOT EXISTS idx_warmup_conv_sent_at ON warmup_conversations(sent_at);
+
+-- ============================================================
+-- ADDITIONAL INDEXES FOR 400+ SUBDOMAINS PERFORMANCE
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_subdomains_active_warmup_daily ON subdomains(status, warmup_complete, emails_sent_today, daily_limit)
+    WHERE status = 'active' AND warmup_complete = true;
+CREATE INDEX IF NOT EXISTS idx_subdomains_domain_status ON subdomains(domain_id, status);

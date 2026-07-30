@@ -404,11 +404,33 @@ function fail(
   };
 }
 
+import { query } from '../db/connection';
+
 export async function getSendStats(): Promise<{
   total_attempted: number;
   total_sent: number;
   total_failed: number;
   success_rate: number;
 }> {
-  return { total_attempted: 0, total_sent: 0, total_failed: 0, success_rate: 0 };
+  try {
+    const result = await query(
+      `SELECT
+        COUNT(*)::int as total_attempted,
+        SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END)::int as total_sent,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)::int as total_failed
+       FROM sent_messages`
+    );
+    const row = result.rows[0];
+    const attempted = row.total_attempted || 0;
+    const sent = row.total_sent || 0;
+    const failed = row.total_failed || 0;
+    return {
+      total_attempted: attempted,
+      total_sent: sent,
+      total_failed: failed,
+      success_rate: attempted > 0 ? Math.round((sent / attempted) * 100) : 0,
+    };
+  } catch {
+    return { total_attempted: 0, total_sent: 0, total_failed: 0, success_rate: 0 };
+  }
 }

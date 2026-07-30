@@ -311,6 +311,28 @@ app.get('/portal/messages/suppressions', async (req, res) => {
   } catch { res.redirect('/login'); }
 });
 
+app.get('/portal/messages/:id/download', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, msgRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/messages/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    if (!msgRes.ok) return res.redirect('/portal/messages');
+    const data = await msgRes.json();
+    const msg = data.message;
+    const rawContent = msg.raw_headers
+      ? `${msg.raw_headers}\n\n${msg.body_text || ''}`
+      : `From: ${msg.mail_from}\nTo: ${msg.rcpt_to}\nSubject: ${msg.subject}\nDate: ${msg.created_at}\n\n${msg.body_text || ''}`;
+    res.setHeader('Content-Type', 'message/rfc822');
+    res.setHeader('Content-Disposition', `attachment; filename="${msg.message_id || 'message'}.eml"`);
+    res.send(rawContent);
+  } catch { res.redirect('/portal/messages'); }
+});
+
 app.get('/portal/messages/:id', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -576,6 +598,22 @@ app.get('/portal/pool', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { pool: [] };
     res.render('pool', { layout: 'application', ...data, title: 'Subdomain Pool', active: 'pool', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/servers', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/servers`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { servers: [] };
+    res.render('servers', { layout: 'application', servers: data.servers, title: 'Servers', active: 'servers', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 

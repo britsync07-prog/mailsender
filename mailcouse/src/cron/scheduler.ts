@@ -4,6 +4,7 @@ import { generateDailyReport } from './daily-report';
 import { generateWeeklyReport } from './weekly-report';
 import { checkDeadLetterQueue } from './dead-letter-review';
 import { checkDomainExpiry } from './domain-expiry-check';
+import { autoCheckCustomerDomainDNS } from './cron-jobs';
 import { checkAllIPsBlacklist } from '../monitoring/mxtoolbox-client';
 import { checkAllDomainsPostmaster } from '../monitoring/postmaster-client';
 import { checkAndRetireDomains } from '../monitoring/domain-retirement';
@@ -99,6 +100,10 @@ const jobHandlers: Record<string, () => Promise<CronJobResult>> = {
     return {
       message: `Warmup progression: ${result.activated} activated, ${result.extended} extended`,
     };
+  }),
+  customer_dns_check: wrapHandler('customer_dns_check', async () => {
+    await autoCheckCustomerDomainDNS();
+    return { message: 'Customer domain DNS check completed' };
   }),
   warmup_reset: wrapHandler('warmup_reset', async () => {
     await resetWarmupCounters();

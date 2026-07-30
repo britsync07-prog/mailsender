@@ -75,9 +75,36 @@
             <span class="sidebarServerList__mode"><span class="label label--serverStatus-development">Dev</span></span>
           </div>
         </a>
+        <a href="/portal/servers" class="sidebarServerList__item <%= active === 'servers' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Servers</div>
+          <div class="sidebarServerList__meta">
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-live">Live</span></span>
+          </div>
+        </a>
+        <a href="/portal/pool" class="sidebarServerList__item <%= active === 'pool' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Subdomain Pool</div>
+          <div class="sidebarServerList__meta">
+            <span class="sidebarServerList__mode"><span class="label label--serverStatus-live">Live</span></span>
+          </div>
+        </a>
       </div>
-      <div class="sidebar__new">
-        <a href="/portal/domains" class="u-link">+ Add new domain</a>
+      <div class="sidebar__section">
+        <h3 class="sidebar__sectionTitle">Settings &amp; Help</h3>
+        <a href="/portal/settings" class="sidebarServerList__item <%= active === 'settings' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Settings</div>
+        </a>
+        <a href="/portal/settings/limits" class="sidebarServerList__item">
+          <div class="sidebarServerList__name">Sending Limits</div>
+        </a>
+        <a href="/portal/settings/retention" class="sidebarServerList__item">
+          <div class="sidebarServerList__name">Message Retention</div>
+        </a>
+        <a href="/portal/settings/advanced" class="sidebarServerList__item">
+          <div class="sidebarServerList__name">Advanced</div>
+        </a>
+        <a href="/portal/help/outgoing" class="sidebarServerList__item <%= active === 'help' ? 'is-active' : '' %>">
+          <div class="sidebarServerList__name">Help</div>
+        </a>
       </div>
     </nav>
     <section class="siteContent__main">

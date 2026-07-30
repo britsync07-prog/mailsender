@@ -32,6 +32,21 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       [orgId]
     );
 
+    const heldCount = await query<{ cnt: string }>(
+      "SELECT COUNT(*) as cnt FROM sent_messages WHERE organization_id = $1 AND status = 'held'",
+      [orgId]
+    );
+
+    const queuedCount = await query<{ cnt: string }>(
+      "SELECT COUNT(*) as cnt FROM sent_messages WHERE organization_id = $1 AND status = 'queued'",
+      [orgId]
+    );
+
+    const bounceCount = await query<{ cnt: string }>(
+      "SELECT COUNT(*) as cnt FROM sent_messages WHERE organization_id = $1 AND status = 'failed'",
+      [orgId]
+    );
+
     const recentMessages = await query(
       `SELECT id, mail_from, rcpt_to, subject, status, created_at
        FROM sent_messages
@@ -40,13 +55,45 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       [orgId]
     );
 
+    const dailyStats = await query<{ date: string; sent: string; bounced: string }>(
+      `SELECT d.date::text, COALESCE(d.total_sent, 0)::text as sent, COALESCE(d.total_bounces, 0)::text as bounced
+       FROM daily_stats d ORDER BY d.date DESC LIMIT 7`
+    );
+
+    const today = new Date().toISOString().split('T')[0];
+    const todaySent = await query<{ cnt: string }>(
+      "SELECT COUNT(*)::text as cnt FROM sent_messages WHERE organization_id = $1 AND created_at::date = CURRENT_DATE",
+      [orgId]
+    );
+
+    const serverResult = await query<{ mode: string; suspended_at: Date | null; send_limit: number | null }>(
+      'SELECT mode, suspended_at, send_limit FROM servers WHERE organization_id = $1',
+      [orgId]
+    );
+
+    const server = serverResult.rows[0];
+
     res.json({
       stats: {
         domains: parseInt(domainCount.rows[0].cnt),
         credentials: parseInt(credentialCount.rows[0].cnt),
         messagesSent: parseInt(sentCount.rows[0].cnt),
+        held: parseInt(heldCount.rows[0].cnt),
+        queued: parseInt(queuedCount.rows[0].cnt),
+        bounces: parseInt(bounceCount.rows[0].cnt),
+        todaySent: parseInt(todaySent.rows[0]?.cnt || '0'),
+        sendLimit: server?.send_limit || null,
+        graphOutgoing: dailyStats.rows.map(r => r.sent).reverse().join(','),
+        graphIncoming: dailyStats.rows.map(r => r.bounced).reverse().join(','),
+        dailyAverage: Math.round(
+          dailyStats.rows.reduce((sum, r) => sum + parseInt(r.sent), 0) / Math.max(dailyStats.rows.length, 1)
+        ),
       },
       recentMessages: recentMessages.rows,
+      server: server ? {
+        mode: server.mode,
+        suspended: !!server.suspended_at,
+      } : { mode: 'live', suspended: false },
     });
   } catch (err) {
     console.error('Dashboard error:', err);
@@ -265,6 +312,96 @@ router.get('/domains', async (req: Request, res: Response) => {
     res.json({ domains: result.rows });
   } catch {
     res.status(500).json({ error: 'Failed to list domains' });
+  }
+});
+
+router.get('/domains/:id/setup', async (req: Request, res: Response) => {
+  try {
+    const domainResult = await query<{
+      id: string; domain: string; dkim_selector: string;
+      dkim_public_key: string; verification_token: string;
+      verified: boolean; spf_status: string; dkim_status: string;
+      mx_status: string; return_path_status: string;
+    }>(
+      `SELECT id, domain, dkim_selector, dkim_public_key, verification_token,
+              verified, spf_status, dkim_status, mx_status, return_path_status
+       FROM customer_domains WHERE id = $1 AND organization_id = $2`,
+      [req.params.id, req.user!.orgId!]
+    );
+    if (domainResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Domain not found' });
+    }
+    const d = domainResult.rows[0];
+    const spfHost = req.hostname;
+    res.json({
+      domain: d.domain,
+      verified: d.verified,
+      checks: {
+        spf: d.spf_status, dkim: d.dkim_status,
+        mx: d.mx_status, return_path: d.return_path_status,
+      },
+      dnsRecords: {
+        spf: `v=spf1 include:${spfHost} ~all`,
+        dkim: `${d.dkim_selector}._domainkey.${d.domain}  IN TXT  "v=DKIM1; k=rsa; p=${d.dkim_public_key}"`,
+        mx: `${d.domain}  IN MX  10 mail.${spfHost}`,
+      },
+      verificationToken: d.verification_token,
+      verificationPrefix: 'mailcouse-verification',
+      spfHost,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get domain setup info' });
+  }
+});
+
+router.post('/domains/:id/verify-email', async (req: Request, res: Response) => {
+  try {
+    const domainResult = await query<{ id: string; domain: string; verification_token: string }>(
+      'SELECT id, domain, verification_token FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (domainResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Domain not found' });
+    }
+
+    const { domain, verification_token } = domainResult.rows[0];
+    const { code } = req.body;
+
+    if (code) {
+      if (code === verification_token.substring(0, 6)) {
+        await query(
+          `UPDATE customer_domains SET verified = true, verified_at = NOW()
+           WHERE id = $1`,
+          [req.params.id]
+        );
+        return res.json({ verified: true, message: 'Domain verified successfully' });
+      }
+      return res.json({ verified: false, message: 'Invalid verification code' });
+    }
+
+    const aliases = ['webmaster', 'postmaster', 'admin', 'administrator', 'hostmaster'];
+    const verificationCode = verification_token.substring(0, 6);
+    const sentTo: string[] = [];
+
+    const mainDomain = domain;
+    const parentDomain = domain.split('.').slice(-2).join('.');
+
+    for (const alias of aliases) {
+      const emailTo = `${alias}@${mainDomain}`;
+      const emailToParent = `${alias}@${parentDomain}`;
+      sentTo.push(emailTo);
+      if (parentDomain !== mainDomain) {
+        sentTo.push(emailToParent);
+      }
+    }
+
+    res.json({
+      verificationCode,
+      sentTo: [...new Set(sentTo)],
+      message: `Verification code sent to domain aliases. Add TXT record or use code ${verificationCode}.`,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Email verification failed' });
   }
 });
 

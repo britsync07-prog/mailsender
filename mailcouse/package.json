@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc && cp -r src/views dist/views && cp -r src/public dist/public",
+    "build": "tsc && cp -r src/views dist/views && cp -r src/public dist/public && cp src/db/schema.sql dist/db/schema.sql",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "test": "jest --coverage",
@@ -13,6 +13,8 @@
     "lint": "tsc --noEmit",
     "seed": "ts-node src/scripts/seed-setup.ts",
     "dns:provision": "ts-node src/scripts/provision-dns.ts",
+    "subdomains:provision": "ts-node src/scripts/provision-subdomains.ts",
+    "subdomains:stats": "ts-node -e \"const {query,closePool}=require('./src/db/connection');(async()=>{const r=await query('SELECT d.domain,COUNT(s.id)::int as total,SUM(CASE WHEN s.status=\\'active\\' THEN 1 ELSE 0 END)::int as active,SUM(CASE WHEN s.status=\\'inactive\\' THEN 1 ELSE 0 END)::int as inactive FROM subdomains s JOIN domains d ON d.id=s.domain_id GROUP BY d.domain');console.table(r.rows);await closePool()})()\"",
     "setup:vps": "bash src/scripts/vps-setup.sh"
   },
   "keywords": [],

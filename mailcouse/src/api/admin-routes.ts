@@ -142,6 +142,71 @@ router.post('/domains/:id/provision', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/subdomain-stats', async (_req: Request, res: Response) => {
+  try {
+    const { getDomainSubdomainStats } = await import('../segmentation/subdomain-provisioner');
+    const stats = await getDomainSubdomainStats();
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get subdomain stats' });
+  }
+});
+
+router.post('/subdomains/bulk', async (req: Request, res: Response) => {
+  try {
+    const { domain_id, count, start_index, naming_scheme, target_ip, create_dns } = req.body;
+    if (!domain_id || !count) {
+      return res.status(400).json({ error: 'domain_id and count required' });
+    }
+
+    const domainRow = await query<{ id: string; domain: string; cloudflare_zone_id: string }>(
+      'SELECT id, domain, cloudflare_zone_id FROM domains WHERE id = $1', [domain_id]
+    );
+    if (domainRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Domain not found' });
+    }
+
+    const { provisionSubdomainBatch } = await import('../segmentation/subdomain-provisioner');
+    const result = await provisionSubdomainBatch({
+      domainId: domain_id,
+      rootDomain: domainRow.rows[0].domain,
+      cloudflareZoneId: domainRow.rows[0].cloudflare_zone_id || undefined,
+      count: parseInt(count),
+      startIndex: start_index ? parseInt(start_index) : 1,
+      namingScheme: naming_scheme || 'smtp',
+      targetIp: target_ip,
+      createDNS: create_dns === true,
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Bulk provision failed', message: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+router.post('/subdomains/bulk-activate', async (req: Request, res: Response) => {
+  try {
+    const { ids, domain_id } = req.body;
+    let idsToActivate: string[];
+    if (ids && Array.isArray(ids)) {
+      idsToActivate = ids;
+    } else if (domain_id) {
+      const result = await query<{ id: string }>(
+        "SELECT id FROM subdomains WHERE domain_id = $1 AND status = 'inactive'", [domain_id]
+      );
+      idsToActivate = result.rows.map(r => r.id);
+    } else {
+      return res.status(400).json({ error: 'Provide ids or domain_id' });
+    }
+
+    const { activateSubdomainBatch } = await import('../segmentation/subdomain-provisioner');
+    const result = await activateSubdomainBatch(idsToActivate);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Bulk activate failed' });
+  }
+});
+
 router.get('/subdomains', async (req: Request, res: Response) => {
   try {
     const domainId = req.query.domain_id as string | undefined;

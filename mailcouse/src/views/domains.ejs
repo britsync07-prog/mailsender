@@ -28,17 +28,20 @@
               <% if (d.verified) { %><span class="label label--green">Verified</span><% } else { %><span class="label label--orange">Pending</span><% } %>
             </p>
             <ul class="domainList__checks">
-              <% if (d.spf_status === 'ok') { %><li class="domainList__check domainList__check--ok">SPF</li><% } else if (d.spf_status) { %><li class="domainList__check domainList__check--warning">SPF</li><% } %>
-              <% if (d.dkim_status === 'ok') { %><li class="domainList__check domainList__check--ok">DKIM</li><% } else if (d.dkim_status) { %><li class="domainList__check domainList__check--warning">DKIM</li><% } %>
-              <% if (d.mx_status === 'ok') { %><li class="domainList__check domainList__check--ok">MX</li><% } else if (d.mx_status) { %><li class="domainList__check domainList__check--neutral-cross">MX</li><% } %>
-              <% if (d.return_path_status === 'ok') { %><li class="domainList__check domainList__check--ok">Return-Path</li><% } else if (d.return_path_status) { %><li class="domainList__check domainList__check--neutral">Return-Path</li><% } %>
+              <% if (d.spf_status === 'ok') { %><li class="domainList__check domainList__check--ok" title="SPF record found">SPF</li><% } else if (d.spf_status && d.spf_status !== 'pending') { %><li class="domainList__check domainList__check--warning" title="SPF record missing">SPF</li><% } else { %><li class="domainList__check domainList__check--neutral" title="SPF not checked">SPF</li><% } %>
+              <% if (d.dkim_status === 'ok') { %><li class="domainList__check domainList__check--ok" title="DKIM record found">DKIM</li><% } else if (d.dkim_status && d.dkim_status !== 'pending') { %><li class="domainList__check domainList__check--warning" title="DKIM record missing">DKIM</li><% } else { %><li class="domainList__check domainList__check--neutral" title="DKIM not checked">DKIM</li><% } %>
+              <% if (d.mx_status === 'ok') { %><li class="domainList__check domainList__check--ok" title="MX record found">MX</li><% } else if (d.mx_status && d.mx_status !== 'pending') { %><li class="domainList__check domainList__check--neutral-cross" title="MX record missing">MX</li><% } else { %><li class="domainList__check domainList__check--neutral" title="MX not checked">MX</li><% } %>
+              <% if (d.return_path_status === 'ok') { %><li class="domainList__check domainList__check--ok" title="Return-Path found">Return-Path</li><% } else if (d.return_path_status && d.return_path_status !== 'pending') { %><li class="domainList__check domainList__check--neutral" title="Return-Path missing">Return-Path</li><% } else { %><li class="domainList__check domainList__check--neutral" title="Return-Path not checked">Return-Path</li><% } %>
             </ul>
           </div>
           <ul class="domainList__properties">
             <li class="domainList__verificationTime">
-              <% if (d.verified) { %>Verified on <%= d.verified_at %><% } else { %><a href="javascript:verifyDomain('<%= d.id %>')" class="domainList__verificationLink">Verify this domain</a><% } %>
+              <% if (d.verified) { %>Verified on <%= new Date(d.verified_at).toLocaleDateString() %><% } else { %>
+                <a href="javascript:verifyDomain('<%= d.id %>')" class="domainList__verificationLink">Verify DNS</a>
+              <% } %>
             </li>
             <li class="domainList__links">
+              <a href="javascript:showDomainSetup('<%= d.id %>')" class="domainList__setupLink">DNS Setup</a>
               <a href="javascript:deleteDomain('<%= d.id %>')" class="domainList__delete">Delete</a>
             </li>
           </ul>
@@ -63,14 +66,29 @@
         <input type="text" id="new-domain" placeholder="example.com">
       </div>
       <div id="domain-dns-records" style="display:none">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;">DNS Records</h3>
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;margin-top:16px;">DNS Records</h3>
         <p style="font-size:12px;color:#999;margin-bottom:10px;">Add these DNS records to your domain provider's DNS settings:</p>
         <pre id="dns-records-output" class="mono codeBlock codeBlock--whitespace" style="white-space:pre-wrap;"></pre>
+        <p style="font-size:12px;color:#999;margin-top:8px;">After adding the records, <a href="javascript:void(0)" onclick="document.getElementById('domain-modal-close').click();location.reload()" style="color:#2585e5">click here to reload</a> and verify your domain.</p>
       </div>
     </div>
     <div class="modal__footer">
-      <button class="button button--neutral" onclick="hideAddDomain()">Cancel</button>
+      <button class="button button--neutral" id="domain-modal-close" onclick="hideAddDomain()">Cancel</button>
       <button class="button button--positive" id="add-domain-btn" onclick="addDomain()">Add Domain</button>
+    </div>
+  </div>
+</div>
+
+<div id="setup-modal" class="modal" style="display:none">
+  <div class="modal__backdrop" onclick="hideSetupModal()"></div>
+  <div class="modal__content modal__content--wide">
+    <div class="modal__header">DNS Setup Instructions</div>
+    <div class="modal__body" id="setup-modal-body">
+      <p>Loading...</p>
+    </div>
+    <div class="modal__footer">
+      <button class="button button--neutral" onclick="hideSetupModal()">Close</button>
+      <button class="button button--positive" id="recheck-dns-btn" onclick="recheckDNS()">Re-check DNS</button>
     </div>
   </div>
 </div>
@@ -78,6 +96,8 @@
 <script>
 function showAddDomain() { document.getElementById('domain-modal').style.display = 'flex'; }
 function hideAddDomain() { document.getElementById('domain-modal').style.display = 'none'; }
+function hideSetupModal() { document.getElementById('setup-modal').style.display = 'none'; }
+
 async function addDomain() {
   var d = document.getElementById('new-domain').value.trim();
   if (!d) return alert('Enter a domain name');
@@ -94,18 +114,68 @@ async function addDomain() {
       'SPF: ' + data.dnsRecords.spf + '\nDKIM: ' + data.dnsRecords.dkim + '\nMX: ' + data.dnsRecords.mx;
     document.getElementById('domain-dns-records').style.display = 'block';
     document.getElementById('new-domain').disabled = true;
-    btn.textContent = 'Close';
+    btn.textContent = 'Done';
     btn.onclick = function() { location.reload(); };
   } catch(e) { alert('Error: ' + e.message); btn.disabled = false; btn.textContent = 'Add Domain'; }
 }
+
 async function verifyDomain(id) {
   var r = await fetch('/api/portal/domains/' + id + '/verify', { headers: { 'Authorization':'Bearer <%= token %>' } });
   var data = await r.json();
-  alert('Verification: ' + (data.verified ? 'ALL OK' : 'Some checks failed') + '\n\nSPF: ' + data.checks.spf + '\nDKIM: ' + data.checks.dkim + '\nMX: ' + data.checks.mx + '\nDMARC: ' + data.checks.return_path);
+  var msg = 'Domain: ' + data.domain + '\n\n';
+  if (data.verified) { msg += 'ALL CHECKS PASSED ✓\n'; }
+  else { msg += 'Some checks failed:\n'; }
+  msg += '\nSPF: ' + (data.checks.spf === 'ok' ? '✓' : '✗');
+  msg += '\nDKIM: ' + (data.checks.dkim === 'ok' ? '✓' : '✗');
+  msg += '\nMX: ' + (data.checks.mx === 'ok' ? '✓' : '✗');
+  msg += '\nReturn-Path: ' + (data.checks.return_path === 'ok' ? '✓' : '✗');
+  alert(msg);
   location.reload();
 }
+
+async function showDomainSetup(id) {
+  var body = document.getElementById('setup-modal-body');
+  body.innerHTML = '<p>Loading DNS setup information...</p>';
+  document.getElementById('setup-modal').style.display = 'flex';
+  document.getElementById('setup-modal').dataset.domainId = id;
+
+  try {
+    var r = await fetch('/api/portal/domains/' + id + '/setup', { headers: { 'Authorization':'Bearer <%= token %>' } });
+    var data = await r.json();
+    if (!r.ok) { body.innerHTML = '<p class="error">' + data.error + '</p>'; return; }
+
+    body.innerHTML =
+      '<p style="margin-bottom:12px;">Add the following DNS records to your domain provider:</p>' +
+      '<div class="formBlock"><label>SPF Record (TXT)</label>' +
+      '<pre class="mono codeBlock">' + data.dnsRecords.spf + '</pre></div>' +
+      '<div class="formBlock"><label>DKIM Record (TXT)</label>' +
+      '<pre class="mono codeBlock">' + data.dnsRecords.dkim + '</pre></div>' +
+      '<div class="formBlock"><label>MX Record</label>' +
+      '<pre class="mono codeBlock">' + data.dnsRecords.mx + '</pre></div>' +
+      '<div class="formBlock" style="margin-bottom:0"><label>Verification (TXT)</label>' +
+      '<pre class="mono codeBlock">' + data.verificationPrefix + ' ' + data.verificationToken + '</pre></div>' +
+      '<p style="color:#999;font-size:12px;margin-top:12px;">Status: ' +
+      '<span style="color:' + (data.checks.spf === 'ok' ? 'green' : 'orange') + '">SPF: ' + data.checks.spf + '</span> &middot; ' +
+      '<span style="color:' + (data.checks.dkim === 'ok' ? 'green' : 'orange') + '">DKIM: ' + data.checks.dkim + '</span> &middot; ' +
+      '<span style="color:' + (data.checks.mx === 'ok' ? 'green' : 'orange') + '">MX: ' + data.checks.mx + '</span> &middot; ' +
+      '<span style="color:' + (data.checks.return_path === 'ok' ? 'green' : 'orange') + '">Return-Path: ' + data.checks.return_path + '</span></p>';
+  } catch(e) { body.innerHTML = '<p>Error: ' + e.message + '</p>'; }
+}
+
+async function recheckDNS() {
+  var id = document.getElementById('setup-modal').dataset.domainId;
+  if (!id) return;
+  var body = document.getElementById('setup-modal-body');
+  body.innerHTML = '<p>Re-checking DNS...</p>';
+  try {
+    var r = await fetch('/api/portal/domains/' + id + '/verify', { headers: { 'Authorization':'Bearer <%= token %>' } });
+    var data = await r.json();
+    location.reload();
+  } catch(e) { body.innerHTML = '<p>Error: ' + e.message + '</p>'; }
+}
+
 async function deleteDomain(id) {
-  if (!confirm('Delete this domain?')) return;
+  if (!confirm('Delete this domain? All messages queued for this domain will fail.')) return;
   await fetch('/api/portal/domains/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
   location.reload();
 }

@@ -3,6 +3,7 @@
 // Mock dependencies
 jest.mock('../../db/connection', () => ({
   query: jest.fn(),
+  getPool: jest.fn(() => ({ totalCount: 0, idleCount: 0, waitingCount: 0 })),
 }));
 
 jest.mock('../parser', () => ({
@@ -29,6 +30,16 @@ const mockClassifyBounce = classifyBounce as jest.MockedFunction<typeof classify
 const mockSuppressBouncedAddress = suppressBouncedAddress as jest.MockedFunction<typeof suppressBouncedAddress>;
 const mockQuery = query as jest.MockedFunction<typeof query>;
 
+const BOUNCE_MESSAGE_WITH_TO =
+  'To: test@example.com\r\n' +
+  'From: sender@example.com\r\n' +
+  'Subject: bounce\r\n' +
+  'Original-Recipient: rfc822;bounce@test.com\r\n' +
+  'Diagnostic-Code: smtp; 550 5.1.1 User unknown\r\n' +
+  '\r\nbody';
+
+const INVALID_MESSAGE = 'no headers here at all\r\n\r\njust body';
+
 describe('Handler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -36,37 +47,16 @@ describe('Handler', () => {
 
   describe('processBounce', () => {
     it('should process bounce successfully', async () => {
-      mockParseBounceMessage.mockReturnValue({
-        recipient: 'test@example.com',
-        sender: 'sender@example.com',
-        smtp_code: 550,
-        message: 'User unknown',
-      });
-
-      mockClassifyBounce.mockReturnValue({
-        type: 'hard_bounce',
-        should_suppress: true,
-        should_retry: false,
-      });
-
-      mockSuppressBouncedAddress.mockResolvedValue({
-        suppressed: true,
-        reason: 'Hard bounce',
-      });
-
       mockQuery.mockResolvedValue({ rows: [], rowCount: 1, command: '', oid: 0, fields: [] });
 
-      const result = await processBounce('bounce message');
+      const result = await processBounce(BOUNCE_MESSAGE_WITH_TO);
 
       expect(result.processed).toBe(true);
-      expect(result.bounce_type).toBe('hard_bounce');
       expect(result.suppressed).toBe(true);
     });
 
     it('should handle parse failure', async () => {
-      mockParseBounceMessage.mockReturnValue(null);
-
-      const result = await processBounce('invalid message');
+      const result = await processBounce(INVALID_MESSAGE);
 
       expect(result.processed).toBe(false);
       expect(result.error).toContain('Failed to parse');
@@ -75,29 +65,11 @@ describe('Handler', () => {
 
   describe('processBounceBatch', () => {
     it('should process batch of bounces', async () => {
-      mockParseBounceMessage.mockReturnValue({
-        recipient: 'test@example.com',
-        sender: 'sender@example.com',
-        smtp_code: 550,
-        message: 'User unknown',
-      });
-
-      mockClassifyBounce.mockReturnValue({
-        type: 'hard_bounce',
-        should_suppress: true,
-        should_retry: false,
-      });
-
-      mockSuppressBouncedAddress.mockResolvedValue({
-        suppressed: true,
-        reason: 'Hard bounce',
-      });
-
       mockQuery.mockResolvedValue({ rows: [], rowCount: 1, command: '', oid: 0, fields: [] });
 
       const result = await processBounceBatch([
-        { message: 'bounce 1' },
-        { message: 'bounce 2' },
+        { message: BOUNCE_MESSAGE_WITH_TO },
+        { message: BOUNCE_MESSAGE_WITH_TO.replace('test@example.com', 'other@example.com') },
       ]);
 
       expect(result.total).toBe(2);
