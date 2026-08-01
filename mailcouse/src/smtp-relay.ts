@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { query } from './db/connection';
 import { config } from './config';
 import { getDomainDKIMPrivateKey } from './dkim/key-store';
+import { findVerifiedDomainForAddress } from './api/domain-logic';
 
 function getLastCode(response: string): { code: number; msg: string; isFinal: boolean } | null {
   const lines = response.trim().split('\r\n');
@@ -119,16 +120,10 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
         const domainPart = fromAddr.split('@')[1]?.toLowerCase();
         if (!domainPart) return callback(new Error('Invalid From address'));
 
-        const domResult = await query<{ id: string; domain: string }>(
-          `SELECT id, domain FROM customer_domains
-           WHERE LOWER(domain) = $1 AND organization_id = $2 AND verified = true`,
-          [domainPart, authUser.organizationId]
-        );
-        if (domResult.rows.length === 0) {
+        const customerDomain = await findVerifiedDomainForAddress(domainPart, authUser.organizationId);
+        if (!customerDomain) {
           return callback(new Error(`530 From domain ${domainPart} is not verified for this account`));
         }
-
-        const customerDomain = domResult.rows[0];
         const subject = parsed.subject || '(no subject)';
         const size = raw.length;
         const headerFrom = parsed.from?.text || fromAddr;
