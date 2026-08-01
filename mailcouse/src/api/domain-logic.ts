@@ -2,6 +2,7 @@
 
 import * as dns from 'dns';
 import { config } from '../config';
+import { query } from '../db/connection';
 
 export const VERIFICATION_EMAIL_ALIASES = ['webmaster', 'postmaster', 'admin', 'administrator', 'hostmaster'] as const;
 export const VERIFICATION_METHODS = ['DNS', 'Email'] as const;
@@ -160,8 +161,8 @@ export async function checkMxRecords(name: string): Promise<DNSStatus> {
   if (records.length === 0) {
     return { status: 'Missing', error: `There are no MX records for ${name}` };
   }
-  const expected = config.dns.mxRecords.map((r) => r.toLowerCase());
-  const present = records.map((r) => r.toLowerCase());
+  const expected = config.dns.mxRecords.map((r) => r.toLowerCase().replace(/\.$/, ''));
+  const present = records.map((r) => r.toLowerCase().replace(/\.$/, ''));
   const missing = expected.filter((r) => !present.includes(r));
   if (missing.length === 0) {
     return { status: 'OK', error: null };
@@ -183,7 +184,9 @@ export async function checkReturnPathRecord(name: string): Promise<DNSStatus> {
   if (records.length === 0) {
     return { status: 'Missing', error: `There is no return path record at ${rpDomain}` };
   }
-  if (records.length === 1 && records[0] === config.dns.returnPathDomain) {
+  const target = records[0].toLowerCase().replace(/\.$/, '');
+  const expected = config.dns.returnPathDomain.toLowerCase().replace(/\.$/, '');
+  if (target === expected) {
     return { status: 'OK', error: null };
   }
   return {
@@ -205,4 +208,24 @@ export async function checkDomainDNS(name: string, identifierString: string, exp
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export async function findVerifiedDomainForAddress(
+  domainOrEmail: string,
+  orgId: string
+): Promise<{ id: string; domain: string } | null> {
+  const domainPart = domainOrEmail.includes('@') ? domainOrEmail.split('@')[1].toLowerCase().trim() : domainOrEmail.toLowerCase().trim();
+  const parentDoms = parentDomains(domainPart);
+  if (parentDoms.length === 0) return null;
+
+  const placeholders = parentDoms.map((_, i) => `$${i + 2}`).join(', ');
+  const result = await query<{ id: string; domain: string }>(
+    `SELECT id, domain FROM customer_domains
+     WHERE LOWER(domain) IN (${placeholders}) AND organization_id = $1 AND verified = true`,
+    [orgId, ...parentDoms]
+  );
+
+  if (result.rows.length === 0) return null;
+  const sorted = result.rows.sort((a, b) => b.domain.length - a.domain.length);
+  return sorted[0];
 }
