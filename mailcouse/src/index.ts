@@ -875,7 +875,8 @@ app.get('/portal/subdomains', async (req, res) => {
     const data = dataRes.ok ? await dataRes.json() : { subdomains: [] };
     const search = (req.query.search as string || '').toLowerCase();
     const filtered = data.subdomains.filter((s: any) => !search || s.subdomain.includes(search) || s.root_domain.includes(search));
-    res.render('subdomains', { layout: 'application', subdomains: filtered, title: 'Subdomains', active: 'subdomains', email: userData.user?.email || '', token, search: req.query.search || '' });
+    const header = await fetchServerHeader(token);
+    res.render('subdomains', { layout: 'application', subdomains: filtered, title: 'Subdomains', activeNav: 'subdomains', email: userData.user?.email || '', token, search: req.query.search || '', ...header });
   } catch { res.redirect('/login'); }
 });
 
@@ -1058,7 +1059,8 @@ app.get('/portal/pool', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { pool: [] };
-    res.render('pool', { layout: 'application', ...data, title: 'Subdomain Pool', active: 'pool', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('pool', { layout: 'application', ...data, title: 'Subdomain Pool', activeNav: 'pool', email: userData.user?.email || '', token, ...header });
   } catch { res.redirect('/login'); }
 });
 
