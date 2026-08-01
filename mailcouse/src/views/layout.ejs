@@ -1,49 +1,58 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="main">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mailcouse - <%= title %></title>
+  <title><%= typeof pageTitle !== 'undefined' && pageTitle ? pageTitle : 'Postal' %></title>
   <link rel="stylesheet" href="/css/postal.css">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700;900&family=Droid+Sans+Mono&display=swap" rel="stylesheet">
+  <link rel="shortcut icon" href="/favicon.png">
+  <meta name="turbolinks-cache-control" content="no-cache">
 </head>
 <body>
-  <nav class="top-nav">
-    <div class="nav-brand">
-      <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-        <rect width="48" height="48" rx="12" fill="#4F46E5"/>
-        <path d="M14 18L24 26L34 18" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M12 20V28C12 29.1046 12.8954 30 14 30H34C35.1046 30 36 29.1046 36 28V20" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <span>Mailcouse</span>
+  <% if (typeof flash !== 'undefined' && flash) { %>
+    <div class="flashMessage<%= flash.type === 'notice' ? ' flashMessage--notice' : '' %>" onclick="this.remove()"><%= flash.message %></div>
+  <% } %>
+  <header class="siteHeader" data-turbolinks-permanent="true">
+    <div class="siteHeader__inside">
+      <p class="siteHeader__logo"><a href="/portal/dashboard">Postal</a></p>
+      <p class="siteHeader__version">The open source e-mail platform</p>
+      <ul class="siteHeader__nav">
+        <% if (typeof orgName !== 'undefined' && orgName) { %>
+          <li class="siteHeader__navItem"></li>
+          <li class="siteHeader__navItem siteHeader__navItem--organization">
+            <span class="siteHeader__navLinkWithMenu"><%= orgName %></span>
+            <ul class="siteHeader__subMenu">
+              <li class="siteHeader__subMenuItem siteHeader__subMenuItem--header"><a href="/portal/dashboard"><%= orgName %></a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/dashboard" class="siteHeader__subMenuLink">Mail servers</a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/domains" class="siteHeader__subMenuLink">Domains</a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/settings" class="siteHeader__subMenuLink">Organization Settings</a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/settings" class="siteHeader__subMenuLink">Create new organization</a></li>
+            </ul>
+          </li>
+        <% } %>
+        <li class="siteHeader__navItem siteHeader__navItem--user"><%= typeof userName !== 'undefined' ? userName : '' %></li>
+        <li class="siteHeader__navItem"><a href="/portal/settings" class="sideHeader__navItemLink">My Settings</a></li>
+        <li class="siteHeader__navItem"><a href="/logout" class="sideHeader__navItemLink">Logout</a></li>
+      </ul>
     </div>
-    <div class="nav-links">
-      <a href="/portal/dashboard" class="<%= active === 'dashboard' ? 'active' : '' %>">Dashboard</a>
-      <a href="/portal/domains" class="<%= active === 'domains' ? 'active' : '' %>">Domains</a>
-      <a href="/portal/credentials" class="<%= active === 'credentials' ? 'active' : '' %>">Credentials</a>
-      <a href="/portal/subdomains" class="<%= active === 'subdomains' ? 'active' : '' %>">Subdomains</a>
-      <a href="/portal/messages" class="<%= active === 'messages' ? 'active' : '' %>">Messages</a>
-      <a href="/portal/settings" class="<%= active === 'settings' ? 'active' : '' %>">Settings</a>
-    </div>
-    <div class="nav-user">
-      <span><%= email %></span>
-      <a href="/logout" class="btn btn-sm">Logout</a>
-    </div>
-  </nav>
-
-  <div class="main-layout">
-    <%- body %>
+  </header>
+  <div class="siteContent">
+    <% if (typeof sidebar !== 'undefined' && sidebar) { %>
+      <nav class="sidebar"><%- sidebar %></nav>
+    <% } %>
+    <section class="siteContent__main">
+      <%- body %>
+      <footer class="siteContent__footer">
+        <ul class="footer__links">
+          <li class="footer__name">Powered by <a href="https://postalserver.io" target="_blank">Postal</a></li>
+          <li><a href="https://docs.postalserver.io" target="_blank">Documentation</a></li>
+          <li><a href="https://discussions.postalserver.io" target="_blank">Ask for help</a></li>
+        </ul>
+      </footer>
+    </section>
   </div>
-
   <script src="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.js"></script>
-  <script>
-    // Convert any element with data-chart attribute to Chartist chart
-    document.querySelectorAll('[data-chart]').forEach(el => {
-      try {
-        const data = JSON.parse(el.getAttribute('data-chart-data') || '{}');
-        const opts = JSON.parse(el.getAttribute('data-chart-options') || '{}');
-        new Chartist[el.getAttribute('data-chart')](el, data, opts);
-      } catch(e) { console.warn('Chart error:', e); }
-    });
-  </script>
+  <script src="/js/postal.js"></script>
 </body>
 </html>

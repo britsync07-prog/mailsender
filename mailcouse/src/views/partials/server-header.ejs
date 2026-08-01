@@ -1,0 +1,55 @@
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title"><%= serverName || 'Mail Server' %></p>
+    <ul class="serverHeader__list">
+      <% if (totalDomains === 0) { %>
+        <li>No domains have been added for this server</li>
+      <% } else if (badDnsDomains === 0) { %>
+        <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly on <%= (totalDomains - unverifiedDomains) %> domain<%= (totalDomains - unverifiedDomains) !== 1 ? 's' : '' %></li>
+      <% } else { %>
+        <li class="serverHeader__list--warning"><a href="/portal/domains"><%= badDnsDomains %> domain<%= badDnsDomains !== 1 ? 's' : '' %> has misconfigured DNS records</a></li>
+      <% } %>
+      <% if (unverifiedDomains > 0) { %>
+        <li><a href="/portal/domains"><%= unverifiedDomains %> domain<%= unverifiedDomains !== 1 ? 's' : '' %> is awaiting verification</a></li>
+      <% } %>
+      <li>Sending via Default IP Pool</li>
+    </ul>
+  </div>
+  <div class="serverHeader__stats" data-turbolinks-permanent="true" id="serverStats-main">
+    <ul class="serverHeader__statsList">
+      <li class="serverHeader__stat-held"><a href="/portal/messages/held" class="js-held-count"><%= heldMessages %> message<%= heldMessages !== 1 ? 's' : '' %> held</a></li>
+      <li class="serverHeader__stat-queue"><a href="/portal/messages/queue" class="js-queue-size"><%= queuedMessages %> queued message<%= queuedMessages !== 1 ? 's' : '' %></a></li>
+      <li class="serverHeader__stat-bounces"><a href="/portal/messages/outgoing?query=status:hardfail+status:bounced" class="js-bounce-rate"><%= bounceRate %>% bounce rate</a></li>
+      <li class="serverHeader__stat-size"><a href="/portal/settings/retention" class="js-disk-size"><%= diskUsed %> used</a></li>
+    </ul>
+  </div>
+  <div class="serverHeader__usage" data-turbolinks-permanent="true" id="serverUsage-main">
+    <p class="serverHeader__usageTitle">Message throughput &mdash; last 60 minutes</p>
+    <div class="serverHeader__usageLine">
+      <span class="serverHeader__usageLineLabel">Outgoing messages</span>
+      <span class="serverHeader__usageLineBar"><span class="bar"><span class="bar__inner js-outgoing-bar" style="width:<%= outgoingPct %>%"></span></span></span>
+      <span class="serverHeader__usageLineValue js-outgoing-count" title="Limit: <%= sendLimit || '∞' %> every 60 minutes"><%= outgoingMessages || 0 %></span>
+    </div>
+    <div class="serverHeader__usageLine">
+      <span class="serverHeader__usageLineLabel">Incoming messages</span>
+      <span class="serverHeader__usageLineValue js-incoming-count"><%= incomingMessages || 0 %></span>
+    </div>
+    <div class="serverHeader__usageLine">
+      <span class="serverHeader__usageLineLabel">Message Rate</span>
+      <span class="serverHeader__usageLineValueLarge"><b class="js-message-rate"><%= messageRate %></b> messages/minute</span>
+    </div>
+  </div>
+</div>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link<%= activeNav === 'overview' ? ' is-active' : '' %>">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link<%= activeNav === 'messages' ? ' is-active' : '' %>">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link<%= activeNav === 'domains' ? ' is-active' : '' %>">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link<%= activeNav === 'routing' ? ' is-active' : '' %>">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link<%= activeNav === 'credentials' ? ' is-active' : '' %>">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link<%= activeNav === 'webhooks' ? ' is-active' : '' %>">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link<%= activeNav === 'settings' ? ' is-active' : '' %>">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link<%= activeNav === 'help' ? ' is-active' : '' %>">Help</a></li>
+  </ul>
+</nav>

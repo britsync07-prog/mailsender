@@ -1,44 +1,48 @@
-<div class="pageHeader">
-  <div class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Webhooks &rarr; History &rarr;</span>
-    Request Details
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
   </div>
 </div>
-
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link is-active">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
 <nav class="navBar navBar--secondary">
   <ul>
     <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Manage Webhooks</a></li>
-    <li class="navBar__item"><a href="/portal/webhooks/history" class="navBar__link">History</a></li>
-    <li class="navBar__item"><a href="/portal/webhooks/history/<%= req.uuid || req.id %>" class="navBar__link is-active">Request</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks/history" class="navBar__link is-active">View History</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
-  <div class="tabular">
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:15px;">Webhook Request</h3>
-    <table class="table">
-      <tbody>
-        <tr><th style="width:200px">UUID</th><td><%= req.uuid || req.id %></td></tr>
-        <tr><th>Event</th><td><%= req.event || 'webhook' %></td></tr>
-        <tr><th>URL</th><td><%= req.url || req.endpoint_url %></td></tr>
-        <tr><th>Status Code</th><td><span class="label label--http-status-<%= String(req.status_code || req.status)[0] %>"><%= req.status_code || req.status %></span></td></tr>
-        <tr><th>Timestamp</th><td><%= new Date(req.timestamp || req.created_at).toLocaleString() %></td></tr>
-        <% if (req.time) { %><tr><th>Time</th><td><%= req.time %>s</td></tr><% } %>
-        <% if (req.log_id) { %><tr><th>Log ID</th><td><%= req.log_id %></td></tr><% } %>
-      </tbody>
-    </table>
-  </div>
-
-  <% if (req.request_body || req.response_body) { %>
-    <div class="tabular u-margin">
-      <% if (req.request_body) { %>
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:10px;">Request Body</h3>
-        <pre class="mono" style="background:#f5f5f5;padding:12px;border-radius:3px;font-size:12px;white-space:pre-wrap;word-break:break-all;"><%= req.request_body %></pre>
-      <% } %>
-      <% if (req.response_body) { %>
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:10px;margin-top:20px;">Response Body</h3>
-        <pre class="mono" style="background:#f5f5f5;padding:12px;border-radius:3px;font-size:12px;white-space:pre-wrap;word-break:break-all;"><%= req.response_body %></pre>
-      <% } %>
-    </div>
-  <% } %>
+  <dl class="pageContent__definitions u-margin">
+    <dt>URL</dt>
+    <dd><%= request.url %></dd>
+    <dt>Event</dt>
+    <dd><%= request.event %></dd>
+    <dt>UUID</dt>
+    <dd><%= request.uuid %></dd>
+    <dt>Timestamp</dt>
+    <dd><%= new Date(request.timestamp || request.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/,/g, ' at') %></dd>
+    <dt>HTTP Status Code</dt>
+    <dd><span class="label label--large label--http-status-<%= String(request.status_code || request.response_code || 200).charAt(0) %>"><%= request.status_code || request.response_code || 200 %></span></dd>
+    <dt>Attempt</dt>
+    <dd><%= request.attempt %><%= request.will_retry ? ' (will be retried)' : '' %></dd>
+  </dl>
+  <p class="pageContent__title">Payload</p>
+  <pre class="codeBlock u-margin codeBlock--whitespace"><%= request.request_body %></pre>
+  <p class="pageContent__title">Response Body</p>
+  <pre class="codeBlock u-margin"><%= request.response_body || '' %></pre>
+  <p class="u-margin"><a href="/portal/webhooks/history" class="button button--neutral">Back to history</a></p>
 </div>

@@ -20,11 +20,10 @@ declare global {
 
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
+  const token = header?.startsWith('Bearer ') ? header.substring(7) : (req as any).cookies?.token;
+  if (!token) {
     return res.status(401).json({ error: 'Authentication required' });
   }
-
-  const token = header.substring(7);
   try {
     const payload = jwt.verify(token, config.platform.jwtSecret) as any;
     req.user = {

@@ -1,0 +1,56 @@
+<form method="GET" class="messageSearch" action="<%= currentPath || '' %>">
+  <p>
+    <a href="javascript:toggleHelp()" class="messageSearch__help js-toggle-helpbox">Need help with filtering?</a>
+    <input type="text" name="search" value="<%= search || '' %>" class="messageSearch__input js-focus-on-f js-form-submit" placeholder="Filter messages..." data-disable-with="Searching...">
+  </p>
+  <div class="messageSearch__helpBox is-hidden js-helpbox" id="search-help" style="display:none">
+    <div class="messageSearch__left">
+      <h3 class="messageSearch__helpBoxTitle">Filtering your messages</h3>
+      <p class="messageSearch__helpBoxText">You can filter your messages on a number of attributes. At present, it is not possible to search the content of your messages. To filter though, you can insert any of the strings as shown opposite into the box above and press enter.</p>
+    </div>
+    <div class="messageSearch__right">
+      <dl class="messageSearch__definition">
+        <dt>to: rachel@example.com</dt>
+        <dd>Returns all mail addressed to the address provided.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>from: tom@example.com</dt>
+        <dd>Returns all mail sent from to the address provided.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>status: pending</dt>
+        <dd>Returns all messages with the status provided. The suitable statuses are: <code>pending</code>, <code>sent</code>, <code>held</code>, <code>softfail</code>, <code>hardfail</code> and <code>bounced</code>.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>before: yyyy-mm-dd hh:mm</dt>
+        <dd>Returns any message received before the given timestamp.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>after: yyyy-mm-dd hh:mm</dt>
+        <dd>Returns any message received after the given timestamp.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>msgid: 57f3a85b35545@server01.mail</dt>
+        <dd>Returns any message with the given Message-ID header.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>tag: password-reset</dt>
+        <dd>Returns any message tagged with the tag provided.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>spam: yes</dt>
+        <dd>By default, spam is not shown in results. To show spam instead of non-spam, just add this to the query.</dd>
+      </dl>
+      <dl class="messageSearch__definition">
+        <dt>order: oldest-first</dt>
+        <dd>By default, newest messages are shown first. To show oldest messages first, you can add this.</dd>
+      </dl>
+    </div>
+  </div>
+</form>
+<script>
+function toggleHelp() {
+  var h = document.getElementById('search-help');
+  h.style.display = h.style.display === 'none' ? 'flex' : 'none';
+}
+</script>

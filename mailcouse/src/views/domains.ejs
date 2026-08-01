@@ -1,78 +1,66 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr;</span>
-    Domains
-  </h1>
-</div>
-
-<nav class="navBar navBar--secondary">
-  <ul>
-    <li class="navBar__item"><a href="/portal/domains" class="navBar__link is-active">Domains</a></li>
-    <li class="navBar__item"><a href="/portal/track-domains" class="navBar__link">Tracking Domains</a></li>
-  </ul>
-</nav>
-
+<%- include('partials/server-header', { activeNav: 'domains', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<%- include('partials/domains-nav', { activeNav: 'domains' }) %>
 <div class="pageContent pageContent--compact">
   <% if (domains.length === 0) { %>
     <div class="noData noData--clean">
       <h2 class="noData__title">There are no domains for this server.</h2>
-      <p class="noData__text">To send &amp; receive messages you need to add &amp; verify the domain you wish to send/receive messages to/from. Add your domain below to get started.</p>
+      <p class="noData__text">
+        To send &amp; receive messages you need to add &amp; verify the domain you wish to send/receive
+        messages to/from. Add your domain below to get started.
+      </p>
       <p class="noData__button"><a href="/portal/domains/add" class="button button--positive">Add your first domain</a></p>
     </div>
   <% } else { %>
     <ul class="domainList u-margin">
-      <% domains.forEach(function(d) { %>
+      <% domains.forEach(function(domain) { %>
         <li class="domainList__item">
           <div class="domainList__details">
             <p class="domainList__name">
-              <a href="/portal/domains/<%= d.id %>/setup"><%= d.domain %></a>
-              <% if (d.outgoing) { %><span class="label label--blue">Any</span><% } %>
+              <a href="/portal/domains/<%= domain.id %>/setup"><%= domain.domain %></a>
+              <% if (domain.use_for_any) { %>
+                <span class="label label--blue">Any</span>
+              <% } %>
             </p>
             <ul class="domainList__checks">
-              <% if (d.spf_status === 'ok') { %>
-                <li class="domainList__check domainList__check--ok" title="SPF record found">SPF</li>
-              <% } else if (d.spf_status) { %>
-                <li class="domainList__check domainList__check--warning" title="SPF record missing"><a href="/portal/domains/<%= d.id %>/setup">SPF</a></li>
-              <% } else { %>
-                <li class="domainList__check domainList__check--neutral" title="SPF not checked">SPF</li>
+              <% if (domain.spf_status === 'OK') { %>
+                <li class="domainList__check domainList__check--ok">SPF</li>
+              <% } else if (domain.spf_status) { %>
+                <li class="domainList__check domainList__check--warning" title="<%= domain.spf_error || '' %>"><a href="/portal/domains/<%= domain.id %>/setup">SPF</a></li>
               <% } %>
 
-              <% if (d.dkim_status === 'ok') { %>
-                <li class="domainList__check domainList__check--ok" title="DKIM record found">DKIM</li>
-              <% } else if (d.dkim_status) { %>
-                <li class="domainList__check domainList__check--warning" title="DKIM record missing"><a href="/portal/domains/<%= d.id %>/setup">DKIM</a></li>
-              <% } else { %>
-                <li class="domainList__check domainList__check--neutral" title="DKIM not checked">DKIM</li>
+              <% if (domain.dkim_status === 'OK') { %>
+                <li class="domainList__check domainList__check--ok">DKIM</li>
+              <% } else if (domain.dkim_status) { %>
+                <li class="domainList__check domainList__check--warning" title="<%= domain.dkim_error || '' %>"><a href="/portal/domains/<%= domain.id %>/setup">DKIM</a></li>
               <% } %>
 
-              <% if (d.mx_status === 'ok') { %>
-                <li class="domainList__check domainList__check--ok" title="MX record found">MX</li>
-              <% } else if (d.mx_status) { %>
-                <li class="domainList__check domainList__check--neutral-cross" title="MX record missing"><a href="/portal/domains/<%= d.id %>/setup">MX</a></li>
-              <% } else { %>
-                <li class="domainList__check domainList__check--neutral" title="MX not checked">MX</li>
+              <% if (domain.mx_status === 'OK') { %>
+                <li class="domainList__check domainList__check--ok">MX</li>
+              <% } else if (domain.mx_status) { %>
+                <li class="domainList__check domainList__check--neutral-cross" title="<%= domain.mx_error || '' %>"><a href="/portal/domains/<%= domain.id %>/setup">MX</a></li>
               <% } %>
 
-              <% if (d.return_path_status === 'ok') { %>
-                <li class="domainList__check domainList__check--ok" title="Return-Path found">Return-Path</li>
-              <% } else if (d.return_path_status === 'missing') { %>
-                <li class="domainList__check domainList__check--neutral" title="Return-Path missing"><a href="/portal/domains/<%= d.id %>/setup">Return-Path</a></li>
-              <% } else if (d.return_path_status) { %>
-                <li class="domainList__check domainList__check--warning" title="Return-Path error"><a href="/portal/domains/<%= d.id %>/setup">Return-Path</a></li>
-              <% } else { %>
-                <li class="domainList__check domainList__check--neutral" title="Return-Path not checked">Return-Path</li>
+              <% if (domain.return_path_status === 'OK') { %>
+                <li class="domainList__check domainList__check--ok">Return Path</li>
+              <% } else if (domain.return_path_status === 'Missing') { %>
+                <li class="domainList__check domainList__check--neutral" title="<%= domain.return_path_error || '' %>"><a href="/portal/domains/<%= domain.id %>/setup">Return Path</a></li>
+              <% } else if (domain.return_path_status) { %>
+                <li class="domainList__check domainList__check--warning" title="<%= domain.return_path_error || '' %>"><a href="/portal/domains/<%= domain.id %>/setup">Return Path</a></li>
               <% } %>
             </ul>
           </div>
+
           <ul class="domainList__properties">
-            <% if (d.verified) { %>
-              <li class="domainList__verificationTime">Verified on <%= new Date(d.verified_at).toLocaleDateString() %></li>
+            <% if (domain.verified) { %>
+              <li class="domainList__verificationTime">Verified on <%= new Date(domain.verified_at).toLocaleString(undefined, { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) %></li>
             <% } else { %>
-              <li><a href="/portal/domains/<%= d.id %>/verify" class="domainList__verificationLink">Verify this domain</a></li>
+              <li><a href="/portal/domains/<%= domain.id %>/verify" class="domainList__verificationLink">Verify this domain</a></li>
             <% } %>
             <li class="domainList__links">
-              <a href="/portal/domains/<%= d.id %>/setup">DNS setup</a>
-              <a href="javascript:deleteDomain('<%= d.id %>')" class="domainList__delete">Delete</a>
+              <% if (domain.verified) { %>
+                <a href="/portal/domains/<%= domain.id %>/setup">DNS setup</a>
+              <% } %>
+              <a href="javascript:void(0)" class="domainList__delete" data-domain-id="<%= domain.id %>" data-domain-name="<%= domain.domain %>">Delete</a>
             </li>
           </ul>
         </li>
@@ -82,11 +70,20 @@
     <p class="u-center"><a href="/portal/domains/add" class="button button--positive">Add new domain</a></p>
   <% } %>
 </div>
-
 <script>
-async function deleteDomain(id) {
-  if (!confirm('Are you sure you wish to remove this domain?')) return;
-  await fetch('/api/portal/domains/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
-  location.reload();
-}
+(function() {
+  var links = document.querySelectorAll('.domainList__delete');
+  Array.prototype.forEach.call(links, function(link) {
+    link.addEventListener('click', function() {
+      var id = link.getAttribute('data-domain-id');
+      var name = link.getAttribute('data-domain-name');
+      if (!confirm('Are you sure you wish to remove this domain?')) return;
+      link.textContent = 'Deleting...';
+      fetch('/api/portal/domains/' + id, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer <%= token %>' }
+      }).then(function() { window.location.href = '/portal/domains'; });
+    });
+  });
+})();
 </script>

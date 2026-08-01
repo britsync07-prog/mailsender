@@ -1,66 +1,86 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr;</span>
-    Tracking Domains
-  </h1>
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
+  </div>
 </div>
-
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
 <nav class="navBar navBar--secondary">
   <ul>
     <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
     <li class="navBar__item"><a href="/portal/track-domains" class="navBar__link is-active">Tracking Domains</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
   <% if (trackDomains.length === 0) { %>
     <div class="noData noData--clean">
-      <h2 class="noData__title">No tracking domains</h2>
-      <p class="noData__text">Tracking domains override the domain used for tracking links &amp; images.</p>
-      <p class="noData__button"><a href="/portal/track-domains/add" class="button button--positive">Add tracking domain</a></p>
+      <h2 class="noData__title">There are no tracking domains for this server.</h2>
+      <p class="noData__text">To use Postal's open &amp; click tracking, you need to configure a domain that links will be re-written to use. Enable message tracking by adding a suitable tracking domain for your outbound e-mails.</p>
+      <p class="noData__button"><a href="/portal/track-domains/add" class="button button--positive">Add a custom tracking domain</a></p>
     </div>
   <% } else { %>
-    <ul class="itemList">
+    <ul class="domainList u-margin">
       <% trackDomains.forEach(function(t) { %>
-        <li class="itemList__item">
-          <div class="itemList__details">
-            <p class="itemList__name">
-              <%= t.domain %>
-              <% if (t.ssl_enabled) { %><span class="label label--green">SSL</span><% } %>
+        <li class="domainList__item">
+          <div class="domainList__details">
+            <p class="domainList__name">
+              <a href="/portal/track-domains/<%= t.id %>/edit"><%= t.domain %></a>
             </p>
-            <p class="itemList__meta">
-              <% if (t.dns_verified) { %>
-                <span class="label label--green">OK</span>
+            <ul class="domainList__checks">
+              <% if (t.dns_status === 'OK') { %>
+                <li class="domainList__check domainList__check--ok">CNAME configured correctly</li>
+              <% } else if (!t.dns_status) { %>
+                <li class="domainList__check domainList__check--neutral-cross">CNAME/DNS not checked yet</li>
               <% } else { %>
-                <span class="label label--orange">Pending</span>
+                <li class="domainList__check domainList__check--warning" title="<%= t.dns_error || '' %>">CNAME not configured correctly</li>
               <% } %>
-              &middot; Created on <%= new Date(t.created_at).toLocaleDateString() %>
-            </p>
-            <p class="itemList__actions">
-              <% if (!t.dns_verified) { %>
-                <a href="javascript:checkTrackDomainDNS('<%= t.id %>')">Check DNS</a>
+              <% if (t.ssl_enabled) { %>
+                <li class="domainList__check domainList__check--neutral"><a href="javascript:toggleSSL('<%= t.id %>')">SSL enabled</a></li>
+              <% } else { %>
+                <li class="domainList__check domainList__check--neutral-cross"><a href="javascript:toggleSSL('<%= t.id %>')">SSL disabled</a></li>
               <% } %>
-              <a href="/portal/track-domains/<%= t.id %>/edit">Settings</a>
-              <a href="javascript:removeTrackDomain('<%= t.id %>')">Delete</a>
-            </p>
+            </ul>
           </div>
+          <ul class="domainList__properties">
+            <li class="domainList__links">
+              <a href="/portal/track-domains/<%= t.id %>/edit">Settings</a>
+              <a href="javascript:checkTrackDomainDNS('<%= t.id %>')" data-disable-with="Checking...">Check DNS</a>
+              <a href="javascript:deleteTrackDomain('<%= t.id %>')" class="domainList__delete">Delete</a>
+            </li>
+          </ul>
         </li>
       <% }) %>
     </ul>
-
-    <p class="u-center"><a href="/portal/track-domains/add" class="button button--positive">Add tracking domain</a></p>
+    <p class="u-center"><a href="/portal/track-domains/add" class="button button--positive">Add new track domain</a></p>
   <% } %>
 </div>
-
 <script>
-async function checkTrackDomainDNS(id) {
-  var r = await fetch('/api/portal/track-domains/' + id + '/check', { method: 'POST', headers: { 'Authorization':'Bearer <%= token %>' } });
+async function toggleSSL(id) {
+  await fetch('/api/portal/track-domains/' + id + '/toggle-ssl', { method:'POST', headers:{ 'Authorization':'Bearer <%= token %>' } });
   location.reload();
 }
-
-async function removeTrackDomain(id) {
-  if (!confirm('Are you sure you want to remove this tracking domain?')) return;
-  await fetch('/api/portal/track-domains/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
+async function checkTrackDomainDNS(id) {
+  var r = await fetch('/api/portal/track-domains/' + id + '/check', { method:'POST', headers:{ 'Authorization':'Bearer <%= token %>' } });
+  var d = await r.json();
+  location.reload();
+}
+async function deleteTrackDomain(id) {
+  if (!confirm('Are you sure you wish to remove this domain?')) return;
+  await fetch('/api/portal/track-domains/' + id, { method:'DELETE', headers:{ 'Authorization':'Bearer <%= token %>' } });
   location.reload();
 }
 </script>

@@ -92,6 +92,23 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE servers ADD COLUMN IF NOT EXISTS suspension_reason TEXT`,
     `ALTER TABLE servers ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'live'`,
     `ALTER TABLE servers ADD COLUMN IF NOT EXISTS send_limit INTEGER`,
+    `ALTER TABLE customer_domains ADD COLUMN IF NOT EXISTS verification_method VARCHAR(20) NOT NULL DEFAULT 'DNS'`,
+    `ALTER TABLE customer_domains ADD COLUMN IF NOT EXISTS dkim_identifier_string VARCHAR(10)`,
+    `ALTER TABLE customer_domains ADD COLUMN IF NOT EXISTS spf_error TEXT`,
+    `ALTER TABLE customer_domains ADD COLUMN IF NOT EXISTS dkim_error TEXT`,
+    `ALTER TABLE customer_domains ADD COLUMN IF NOT EXISTS mx_error TEXT`,
+    `ALTER TABLE customer_domains ADD COLUMN IF NOT EXISTS return_path_error TEXT`,
+    `ALTER TABLE customer_domains ADD COLUMN IF NOT EXISTS use_for_any BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE servers ADD COLUMN IF NOT EXISTS spam_threshold DECIMAL(8,2) NOT NULL DEFAULT 5`,
+    `ALTER TABLE servers ADD COLUMN IF NOT EXISTS spam_failure_threshold DECIMAL(8,2) NOT NULL DEFAULT 20`,
+    `ALTER TABLE sent_messages ADD COLUMN IF NOT EXISTS spam_score DECIMAL(8,2)`,
+    `ALTER TABLE sent_messages ADD COLUMN IF NOT EXISTS spam_status VARCHAR(20) NOT NULL DEFAULT 'not_checked'`,
+    `ALTER TABLE sent_messages ADD COLUMN IF NOT EXISTS tag VARCHAR(255)`,
+    `ALTER TABLE sent_messages ADD COLUMN IF NOT EXISTS spam_checks JSONB`,
+    `ALTER TABLE routes ADD COLUMN IF NOT EXISTS spam_mode VARCHAR(20) NOT NULL DEFAULT 'Mark'`,
+    `ALTER TABLE routes ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'Endpoint'`,
+    `ALTER TABLE customer_domains DROP CONSTRAINT IF EXISTS customer_domains_domain_key`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS customer_domains_org_domain_key ON customer_domains (organization_id, LOWER(domain))`,
   ];
   const client = await getPool().connect();
   try {

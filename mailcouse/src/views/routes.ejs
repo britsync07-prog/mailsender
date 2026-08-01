@@ -1,59 +1,63 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr;</span>
-    Routes
-  </h1>
-</div>
-
-<nav class="navBar navBar--secondary">
+<%- include('partials/server-header', { activeNav: 'routing', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<nav class="navBar">
   <ul>
-    <li class="navBar__item"><a href="/portal/routes" class="navBar__link is-active">Routes</a></li>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link is-active">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
   <% if (routes.length === 0) { %>
     <div class="noData noData--clean">
-      <h2 class="noData__title">No routes configured</h2>
-      <p class="noData__text">Routes allow you to forward incoming messages to an external service.</p>
-      <p class="noData__button"><a href="/portal/routes/add" class="button button--positive">Add route</a></p>
+      <h2 class="noData__title">No routes have been configured for this server.</h2>
+      <p class="noData__text">
+        To receive incoming mail, you need to add routes to where we should send
+        messages we receive for your domain. You can send incoming e-mail to
+        HTTP endpoints, other SMTP servers or e-mail addresses.
+      </p>
+      <% if (endpointCounts.total === 0) { %>
+        <p class="noData__button buttonSet buttonSet--center">
+          <a href="/portal/routes/add?endpoint=http" class="button button--positive">Add a HTTP endpoint</a>
+          <a href="/portal/routes/add?endpoint=smtp" class="button button--positive">Add a SMTP endpoint</a>
+          <a href="/portal/routes/add?endpoint=address" class="button button--positive">Add an address endpoint</a>
+        </p>
+        <p class="noData__postButtonText">
+          Once you've added these, you'll be able to come back here to route a
+          specific e-mail address to your newly created endpoint. You can
+          <a href="/portal/routes/add" class="u-link">add a route without an endpoint</a> if you really want.
+        </p>
+      <% } else { %>
+        <p class="noData__button"><a href="/portal/routes/add" class="button button--positive">Add your first route</a></p>
+      <% } %>
     </div>
   <% } else { %>
-    <ul class="itemList">
-      <% routes.forEach(function(r) { %>
-        <li class="itemList__item">
-          <div class="itemList__details">
-            <p class="itemList__name">
-              <span class="label label--blue"><%= r.endpoint_type %></span>
-              <% if (r.endpoint_type === 'SMTP') { %>
-                <span><%= r.smtp_host %>:<%= r.smtp_port %></span>
-              <% } else if (r.endpoint_type === 'HTTP') { %>
-                <span><%= r.http_url %></span>
-              <% } else { %>
-                <span><%= r.address %></span>
-              <% } %>
-            </p>
-            <p class="itemList__meta">
-              Span mode: <%= r.spam_mode || 'mark' %>
-              &middot; Recipients: <strong><%= r.name %></strong>
-            </p>
-            <p class="itemList__actions">
-              <a href="/portal/routes/<%= r.id %>/edit">Edit</a>
-              <a href="javascript:removeRoute('<%= r.id %>')">Remove</a>
-            </p>
-          </div>
+    <p class="pageContent__intro u-margin">
+      Routes control where incoming mail for your domain is sent. Messages can be sent to
+      HTTP endpoints, other SMTP servers or e-mail addresses.
+    </p>
+    <p class="u-margin pageContent__helpLink"><a href="/portal/help/incoming">Read more about receiving e-mails</a></p>
+
+    <ul class="routeList u-margin">
+      <% routes.forEach(function(route) { %>
+        <li class="routeList__item">
+          <a href="/portal/routes/<%= route.id %>/edit" class="routeList__link">
+            <p class="routeList__name"><%= route.description %></p>
+            <div class="routeList__details">
+              <p class="routeList__endpoint routeList__endpoint--<%= (route.endpoint_type || 'none').toLowerCase().replace(' ', '_') %>">
+                <% if (route.mode === 'Endpoint') { %><%= route.endpoint || 'No endpoint' %><% } else { %><%= route.mode %><% } %>
+              </p>
+              <p class="routeList__spamMode"><%= route.spam_mode %></p>
+            </div>
+          </a>
         </li>
-      <% }) %>
+      <% }); %>
     </ul>
 
-    <p class="u-center"><a href="/portal/routes/add" class="button button--positive">Add route</a></p>
+    <p class="u-center"><a href="/portal/routes/add" class="button button--positive">Add another route</a></p>
   <% } %>
 </div>
-
-<script>
-async function removeRoute(id) {
-  if (!confirm('Are you sure you want to remove this route?')) return;
-  await fetch('/api/portal/routes/' + id, { method: 'DELETE', headers: { 'Authorization':'Bearer <%= token %>' } });
-  location.reload();
-}
-</script>

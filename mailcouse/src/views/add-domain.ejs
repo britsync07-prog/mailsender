@@ -1,32 +1,21 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr; Domains &rarr;</span>
-    Add new domain
-  </h1>
-</div>
-
-<nav class="navBar navBar--secondary">
-  <ul>
-    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
-  </ul>
-</nav>
-
+<%- include('partials/server-header', { activeNav: 'domains', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<%- include('partials/domains-nav', { activeNav: 'domains' }) %>
 <div class="pageContent pageContent--compact">
-  <form action="/api/portal/domains" method="POST" id="add-domain-form" onsubmit="return addDomain(event)">
+  <% if (typeof error !== 'undefined' && error) { %>
+    <div class="errorExplanation"><ul><li><%= error %></li></ul></div>
+  <% } %>
+  <form id="new-domain-form" action="/api/portal/domains" method="POST" remote="true">
     <fieldset class="fieldSet">
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="domain-name">Domain name</label>
-        <div class="fieldSet__input">
-          <input type="text" id="domain-name" name="name" class="input input--text" autofocus placeholder="example.com">
-          <p class="fieldSet__text">The domain you wish to send &amp; receive e-mail from.</p>
-        </div>
+        <label class="fieldSet__label" for="domain_name">Name</label>
+        <div class="fieldSet__input"><input type="text" name="domain" id="domain_name" autofocus="autofocus" class="input input--text"></div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="verification-method">Verification method</label>
+        <label class="fieldSet__label" for="domain_verification_method">Verification method</label>
         <div class="fieldSet__input">
-          <select id="verification-method" name="verification_method" class="input input--select">
-            <option value="dns">DNS</option>
-            <option value="email">E-Mail</option>
+          <select name="verification_method" id="domain_verification_method" class="input input--select">
+            <option value="DNS">DNS</option>
+            <option value="Email">Email</option>
           </select>
           <p class="fieldSet__text">
             Choose how you'd like to verify your ownership of this domain. If you choose <b>E-Mail</b> we can send you
@@ -36,56 +25,48 @@
         </div>
       </div>
     </fieldset>
-    <div id="domain-dns-records" style="display:none" class="u-margin">
-      <div style="background:#fafafa;border:1px solid #e4e8ef;border-radius:3px;padding:16px;margin-top:10px;">
-        <p style="font-weight:600;margin-bottom:10px;">DNS Records</p>
-        <div class="formBlock"><label>SPF Record (TXT)</label><pre class="codeBlock" id="dns-spf"></pre></div>
-        <div class="formBlock"><label>DKIM Record (TXT)</label><pre class="codeBlock" id="dns-dkim"></pre></div>
-        <div class="formBlock"><label>MX Record</label><pre class="codeBlock" id="dns-mx"></pre></div>
-        <div class="formBlock" style="margin-bottom:0"><label>Verification (TXT)</label><pre class="codeBlock" id="dns-verify"></pre></div>
-        <p style="color:#999;font-size:12px;margin-top:10px;">Add these DNS records to your domain provider, then click "Done" to continue.</p>
-      </div>
+    <div class="fieldSetSubmit">
+      <input type="submit" value="Add domain" class="button button--positive js-form-submit">
     </div>
-    <p class="fieldSetSubmit buttonSet">
-      <button type="submit" class="button button--positive js-form-submit" id="add-domain-btn">Add Domain</button>
-      <a href="/portal/domains" class="button button--neutral">Cancel</a>
-    </p>
   </form>
 </div>
-
 <script>
-async function addDomain(e) {
-  e.preventDefault();
-  var domain = document.getElementById('domain-name').value.trim();
-  if (!domain) { alert('Enter a domain name'); return false; }
-
-  var btn = document.getElementById('add-domain-btn');
-  btn.disabled = true;
-  btn.textContent = 'Adding...';
-
-  try {
-    var r = await fetch('/api/portal/domains', {
+(function() {
+  var form = document.getElementById('new-domain-form');
+  if (!form) return;
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var btn = form.querySelector('.js-form-submit');
+    btn.disabled = true;
+    btn.value = 'Adding...';
+    fetch('/api/portal/domains', {
       method: 'POST',
-      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
-      body: JSON.stringify({ domain: domain, verification_method: document.getElementById('verification-method').value })
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer <%= token %>' },
+      body: JSON.stringify({ domain: form.domain.value, verification_method: form.verification_method.value })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.error) {
+        var box = document.querySelector('.errorExplanation');
+        if (!box) {
+          box = document.createElement('div');
+          box.className = 'errorExplanation';
+          box.innerHTML = '<ul></ul>';
+          form.insertBefore(box, form.firstChild);
+        }
+        box.querySelector('ul').innerHTML = '<li>' + data.error + '</li>';
+        btn.disabled = false;
+        btn.value = 'Add domain';
+      } else if (data.redirect) {
+        window.location.href = data.redirect;
+      } else if (data.id) {
+        window.location.href = '/portal/domains/' + data.id + '/verify';
+      } else {
+        btn.disabled = false;
+        btn.value = 'Add domain';
+      }
+    }).catch(function() {
+      btn.disabled = false;
+      btn.value = 'Add domain';
     });
-    var data = await r.json();
-
-    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add Domain'; return false; }
-
-    document.getElementById('dns-spf').textContent = data.dnsRecords.spf;
-    document.getElementById('dns-dkim').textContent = data.dnsRecords.dkim;
-    document.getElementById('dns-mx').textContent = data.dnsRecords.mx;
-    document.getElementById('dns-verify').textContent = data.verificationPrefix + ' ' + data.verificationToken;
-    document.getElementById('domain-dns-records').style.display = 'block';
-    document.getElementById('domain-name').disabled = true;
-    btn.textContent = 'Done';
-    btn.onclick = function() { window.location.href = '/portal/domains/' + data.id + '/setup'; };
-  } catch(e) {
-    alert('Error: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = 'Add Domain';
-  }
-  return false;
-}
+  });
+})();
 </script>

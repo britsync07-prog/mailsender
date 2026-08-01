@@ -1,135 +1,87 @@
 <div class="serverHeader">
-  <div class="serverHeader__stripe serverHeader__stripe--<%= server?.mode === 'live' ? 'live' : 'dev' %>">
-    <%= server?.mode === 'live' ? 'Live' : 'Development' %>
-  </div>
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
   <div class="serverHeader__info">
-    <div class="serverHeader__title">Mail Server</div>
+    <p class="serverHeader__title">Mail Server</p>
     <ul class="serverHeader__list">
-      <li class="serverHeader__list--ok">&check; Outgoing messages</li>
-      <li class="serverHeader__list--ok">&check; All domains verified</li>
+      <% if (totalDomains === 0) { %>
+        <li>No domains have been added for this server</li>
+      <% } else if (badDnsDomains === 0) { %>
+        <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly on <%= (totalDomains - unverifiedDomains) %> domain<%= (totalDomains - unverifiedDomains) !== 1 ? 's' : '' %></li>
+      <% } else { %>
+        <li class="serverHeader__list--warning"><a href="/portal/domains"><%= badDnsDomains %> domain<%= badDnsDomains !== 1 ? 's' : '' %> has misconfigured DNS records</a></li>
+      <% } %>
+      <% if (unverifiedDomains > 0) { %>
+        <li><a href="/portal/domains"><%= unverifiedDomains %> domain<%= unverifiedDomains !== 1 ? 's' : '' %> is awaiting verification</a></li>
+      <% } %>
+      <li>Sending via Default IP Pool</li>
     </ul>
   </div>
-  <div class="serverHeader__stats">
+  <div class="serverHeader__stats" data-turbolinks-permanent="true" id="serverStats-main">
     <ul class="serverHeader__statsList">
-      <li><strong><%= stats.held || 0 %></strong> Held</li>
-      <li><strong><%= stats.queued || 0 %></strong> Queue</li>
-      <li><strong><%= stats.bounces || 0 %></strong> Bounces</li>
-      <li><strong><%= server?.suspended ? 'Suspended' : (stats.domains + ' domains') %></strong></li>
+      <li class="serverHeader__stat-held"><a href="/portal/messages?scope=held" class="js-held-count"><%= heldMessages %> message<%= heldMessages !== 1 ? 's' : '' %> held</a></li>
+      <li class="serverHeader__stat-queue"><a href="/portal/messages?scope=queued" class="js-queue-size"><%= queuedMessages %> queued message<%= queuedMessages !== 1 ? 's' : '' %></a></li>
+      <li class="serverHeader__stat-bounces"><a href="/portal/messages?query=status:hardfail+status:bounced" class="js-bounce-rate"><%= bounceRate %>% bounce rate</a></li>
+      <li class="serverHeader__stat-size"><a href="/portal/settings/retention" class="js-disk-size"><%= diskUsed %> used</a></li>
     </ul>
   </div>
-  <div class="serverHeader__usage">
-    <div class="serverHeader__usageTitle">Monthly usage</div>
+  <div class="serverHeader__usage" data-turbolinks-permanent="true" id="serverUsage-main">
+    <p class="serverHeader__usageTitle">Message throughput &mdash; last 60 minutes</p>
     <div class="serverHeader__usageLine">
-      <span class="serverHeader__usageLineLabel">Sent</span>
-      <span class="serverHeader__usageLineBar"><span class="bar"><span class="bar__inner" style="width:<%= Math.min(100, (stats.messagesSent || 0) / (Math.max(stats.sendLimit || 1000, 1000)) * 100) %>%"></span></span></span>
-      <span class="serverHeader__usageLineValue"><%= stats.messagesSent || 0 %></span>
+      <span class="serverHeader__usageLineLabel">Outgoing messages</span>
+      <span class="serverHeader__usageLineBar"><span class="bar"><span class="bar__inner js-outgoing-bar" style="width:<%= outgoingPct %>%"></span></span></span>
+      <span class="serverHeader__usageLineValue js-outgoing-count" title="Limit: <%= sendLimit || '∞' %> every 60 minutes"><%= outgoingMessages || 0 %></span>
     </div>
     <div class="serverHeader__usageLine">
-      <span class="serverHeader__usageLineLabel">Today</span>
-      <span class="serverHeader__usageLineBar"><span class="bar"><span class="bar__inner" style="width:<%= Math.min(100, (stats.todaySent || 0) / 50 * 100) %>%"></span></span></span>
-      <span class="serverHeader__usageLineValue"><%= stats.todaySent || 0 %></span>
+      <span class="serverHeader__usageLineLabel">Incoming messages</span>
+      <span class="serverHeader__usageLineValue js-incoming-count"><%= incomingMessages || 0 %></span>
     </div>
     <div class="serverHeader__usageLine">
-      <span class="serverHeader__usageLineLabel">Limit</span>
-      <span class="serverHeader__usageLineValueLarge"><%= stats.sendLimit ? (stats.sendLimit + '/day') : 'Unlimited' %> <b>&rarr;</b></span>
+      <span class="serverHeader__usageLineLabel">Message Rate</span>
+      <span class="serverHeader__usageLineValueLarge"><b class="js-message-rate"><%= messageRate %></b> messages/minute</span>
     </div>
   </div>
 </div>
-
 <nav class="navBar">
   <ul>
     <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link is-active">Overview</a></li>
-    <li class="navBar__item navBar__item--end"><a href="/portal/messages" class="navBar__link">View all messages</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
   </ul>
 </nav>
-
 <div class="pageContent">
   <% if (recentMessages && recentMessages.length > 0) { %>
-    <div class="mailGraph u-margin">
+    <div class="mailGraph u-margin" data-data='<%= JSON.stringify(graphData) %>'>
       <ul class="mailGraph__key">
+        <li class="mailGraph__key--in">Incoming Messages</li>
         <li class="mailGraph__key--out">Outgoing Messages</li>
-        <li>Bounced</li>
       </ul>
-      <% var chartOut = (stats.graphOutgoing || '').split(',').filter(Boolean).map(Number); %>
-      <% var chartIn = (stats.graphIncoming || '').split(',').filter(Boolean).map(Number); %>
-      <%
-        var labels = [];
-        var days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-        var todayIdx = new Date().getDay();
-        for (var i = 6; i >= 0; i--) { labels.push(days[(todayIdx - i + 7) % 7]); }
-        var chartData = JSON.stringify({
-          labels: labels,
-          series: [chartOut.length ? chartOut : [0,0,0,0,0,0,0], chartIn.length ? chartIn : [0,0,0,0,0,0,0]]
-        });
-      %>
-      <% if (chartOut.length > 0) { %>
-        <div class="mailGraph__graph" data-chart="Line" data-chart-data='<%= chartData %>' data-chart-options='{"showPoint":false,"lineSmooth":false,"axisX":{"showLabel":true},"axisY":{"showLabel":false}}'></div>
-      <% } else { %>
-        <div class="mailGraph__graph mailGraph__graph--empty">
-          <p style="text-align:center;padding:30px;color:#999;">No message data yet. Start sending to see your graph.</p>
-        </div>
-      <% } %>
+      <div class="mailGraph__graph" data-chart="Line" data-chart-data='<%= JSON.stringify({labels:graphLabels,series:graphSeries}) %>' data-chart-options='{"showPoint":false,"lineSmooth":false,"axisX":{"showLabel":true},"axisY":{"showLabel":false}}'></div>
       <ul class="mailGraph__labels">
-        <li>Last 7 days &rarr;</li>
-        <li>Today: <strong><%= stats.todaySent || 0 %></strong></li>
+        <li><%= graphFirstDate %> &rarr;</li>
+        <li>Today at <strong><%= new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}) %></strong></li>
       </ul>
     </div>
-
-    <div class="quickSummary u-margin">
-      <ul class="quickSummary__list">
-        <li class="quickSummary__item">
-          <span class="quickSummary__number"><%= stats.domains || 0 %></span>
-          <span class="quickSummary__label">Domains</span>
-        </li>
-        <li class="quickSummary__item">
-          <span class="quickSummary__number"><%= stats.credentials || 0 %></span>
-          <span class="quickSummary__label">Credentials</span>
-        </li>
-        <li class="quickSummary__item">
-          <span class="quickSummary__number"><%= stats.messagesSent || 0 %></span>
-          <span class="quickSummary__label">Total Sent</span>
-        </li>
-        <li class="quickSummary__item">
-          <span class="quickSummary__number"><%= stats.held || 0 %></span>
-          <span class="quickSummary__label">Held</span>
-        </li>
-      </ul>
-    </div>
-
     <div class="titleWithLinks u-margin">
       <h2 class="titleWithLinks__title">Recently processed e-mails</h2>
       <ul class="titleWithLinks__links">
+        <li><a href="/portal/messages?scope=queued" class="titleWithLinks__link">View message queue</a></li>
         <li><a href="/portal/messages" class="titleWithLinks__link">View full e-mail history</a></li>
       </ul>
     </div>
-
-    <div class="messageList">
-      <% recentMessages.forEach(function(msg) { %>
-        <div class="messageList__message">
-          <a href="/portal/messages/<%= msg.id %>" class="messageList__link">
-            <div class="messageList__details messageList__details--outgoing">
-              <div class="messageList__subject"><%= msg.subject || '(no subject)' %></div>
-              <dl class="messageList__addresses">
-                <dt>To:</dt><dd><%= msg.rcpt_to %></dd>
-                <dt>From:</dt><dd><%= msg.mail_from %></dd>
-              </dl>
-            </div>
-            <div class="messageList__meta">
-              <div class="messageList__timestamp"><%= new Date(msg.created_at).toLocaleString() %></div>
-              <div class="messageList__status"><span class="label label--messageStatus-<%= msg.status %>"><%= msg.status %></span></div>
-            </div>
-          </a>
-        </div>
-      <% }) %>
-    </div>
+    <%- include('messages/_list', { messages: recentMessages }) %>
   <% } else { %>
     <div class="pageContent--compact">
       <div class="noData noData--clean">
         <h2 class="noData__title">Your new mail server is ready to go.</h2>
         <p class="noData__text">Check out the information below to get started sending &amp; receiving e-mail through your new mail server.</p>
         <div class="noData__button buttonSet buttonSet--center">
-          <a href="/portal/domains" class="button">Add your first domain</a>
-          <a href="/portal/settings" class="button">Configure your server</a>
+          <a href="/portal/help/outgoing" class="button">Read about sending e-mail</a>
+          <a href="/portal/help/incoming" class="button">Read about receiving e-mail</a>
         </div>
       </div>
     </div>

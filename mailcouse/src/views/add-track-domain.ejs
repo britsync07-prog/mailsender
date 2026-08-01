@@ -1,71 +1,118 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr; Tracking Domains &rarr;</span>
-    Add tracking domain
-  </h1>
+<% var td = typeof trackDomain !== 'undefined' ? trackDomain : null; %>
+<% var tdName = ''; var tdParent = ''; %>
+<% if (td && td.domain) { var dotIdx = td.domain.indexOf('.'); if (dotIdx > 0) { tdName = td.domain.substring(0, dotIdx); tdParent = td.domain.substring(dotIdx + 1); } else { tdName = td.domain; } } %>
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
+  </div>
 </div>
-
-<nav class="navBar navBar--secondary">
+<nav class="navBar">
   <ul>
-    <li class="navBar__item"><a href="/portal/track-domains" class="navBar__link">Tracking Domains</a></li>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
   </ul>
 </nav>
-
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/track-domains" class="navBar__link is-active">Tracking Domains</a></li>
+  </ul>
+</nav>
 <div class="pageContent pageContent--compact">
-  <form action="/api/portal/track-domains" method="POST" onsubmit="return addTrackDomain(event)">
+  <form id="track-domain-form" onsubmit="saveTrackDomain(event)">
     <fieldset class="fieldSet">
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="domain-name">Domain name</label>
+        <label class="fieldSet__label">Domain</label>
         <div class="fieldSet__input">
-          <input type="text" id="domain-name" name="name" class="input input--text" autofocus placeholder="track.example.com">
-          <p class="fieldSet__text">The domain you'd like to use for tracking links &amp; images.</p>
+          <div class="routeNameInput">
+            <input type="text" id="td-name" class="input input--text routeNameInput__name" autofocus value="<%= tdName %>" <%= td ? 'disabled' : '' %> placeholder="click">
+            <span class="routeNameInput__at">.</span>
+            <select id="td-domain" class="input input--select routeNameInput__domain" <%= td ? 'disabled' : '' %>>
+              <% domains.forEach(function(d) { %>
+                <option value="<%= d.domain %>" <%= tdParent === d.domain ? 'selected' : '' %>><%= d.domain %></option>
+              <% }) %>
+            </select>
+          </div>
+          <p class="fieldSet__text">This is the domain that requests for tracked links will be directed through when you use click tracking. We recommend using something like <b>click.yourdomain.com</b>. Once chosen, add a CNAME record which points to <b>track.example.com</b>.</p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="ssl-enabled">SSL</label>
+        <label class="fieldSet__label">SSL Enabled</label>
         <div class="fieldSet__input">
-          <label class="checkbox">
-            <input type="checkbox" id="ssl-enabled" name="ssl_enabled" checked>
-            <span>Use SSL for this tracking domain</span>
-          </label>
-          <p class="fieldSet__text">This should be enabled unless you are testing or using this domain behind a load balancer.</p>
+          <select id="td-ssl" class="input input--select">
+            <option value="true" <%= !td || td.ssl_enabled ? 'selected' : '' %>>Yes - use SSL for tracking whenever possible</option>
+            <option value="false" <%= td && td.ssl_enabled === false ? 'selected' : '' %>>No - never use SSL for tracking</option>
+          </select>
+          <p class="fieldSet__text">If enabled, we'll use https for the tracking domain when replacing links and images. Please note that a SSL certificate should be installed on the tracking domain if enabled.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Track Loads</label>
+        <div class="fieldSet__input">
+          <select id="td-track-loads" class="input input--select">
+            <option value="true" <%= !td || td.track_loads ? 'selected' : '' %>>Yes - track when HTML e-mails are opened</option>
+            <option value="false" <%= td && td.track_loads === false ? 'selected' : '' %>>No - don't track when HTML e-mails are opened</option>
+          </select>
+          <p class="fieldSet__text">If enabled, we'll insert a 1px image into the footer of any HTML e-mails. When this image is loaded, we'll log this as a view and notify you with a webhook.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Track Clicks</label>
+        <div class="fieldSet__input">
+          <select id="td-track-clicks" class="input input--select">
+            <option value="true" <%= !td || td.track_clicks ? 'selected' : '' %>>Yes - track when links are clicked</option>
+            <option value="false" <%= td && td.track_clicks === false ? 'selected' : '' %>>No - don't track when links are clicked</option>
+          </select>
+          <p class="fieldSet__text">If enabled, we'll rewrite URLs in your outbound messages to go via this domain. You'll receive a webhook when someone clicks one of your links and it will be displayed in the web interface.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Domains excluded from tracking</label>
+        <div class="fieldSet__input">
+          <textarea id="td-excluded" class="input input--smallArea"><%= td ? td.excluded_click_domains : '' %></textarea>
+          <p class="fieldSet__text">This is a list of domains of links that you don't wish to be tracked. When click tracking is enabled, you can provide a list (one domain per line) for links that you don't wish to be tracked.</p>
         </div>
       </div>
     </fieldset>
-    <p class="fieldSetSubmit buttonSet">
-      <button type="submit" class="button button--positive js-form-submit" id="add-btn">Add tracking domain</button>
-      <a href="/portal/track-domains" class="button button--neutral">Cancel</a>
-    </p>
+    <div class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit"><%= td ? 'Save Track Domain' : 'Create Track Domain' %></button>
+    </div>
   </form>
 </div>
-
 <script>
-async function addTrackDomain(e) {
+async function saveTrackDomain(e) {
   e.preventDefault();
-  var domain = document.getElementById('domain-name').value.trim();
-  if (!domain) { alert('Enter a domain name'); return false; }
-
-  var btn = document.getElementById('add-btn');
-  btn.disabled = true;
-  btn.textContent = 'Adding...';
-
+  var btn = document.querySelector('#track-domain-form .js-form-submit');
+  btn.textContent = 'Saving...'; btn.disabled = true;
   try {
-    var r = await fetch('/api/portal/track-domains', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
-      body: JSON.stringify({
-        domain: domain,
-        ssl_enabled: document.getElementById('ssl-enabled').checked
-      })
+    var nameEl = document.getElementById('td-name');
+    var domainEl = document.getElementById('td-domain');
+    var fullDomain = '<%= td ? "" : "" %>' + nameEl.value + '.' + domainEl.value;
+    var body = {
+      ssl_enabled: document.getElementById('td-ssl').value === 'true',
+      track_loads: document.getElementById('td-track-loads').value === 'true',
+      track_clicks: document.getElementById('td-track-clicks').value === 'true',
+      excluded_click_domains: document.getElementById('td-excluded').value
+    };
+    var url = '<%= td ? "/api/portal/track-domains/" + td.id : "/api/portal/track-domains" %>';
+    if (!td) body.domain = fullDomain;
+    var r = await fetch(url, {
+      method:'<%= td ? "PUT" : "POST" %>',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer <%= token %>'},
+      body:JSON.stringify(body)
     });
-    var data = await r.json();
-    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add tracking domain'; return false; }
-    window.location.href = '/portal/track-domains';
-  } catch(e) {
-    alert('Error: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = 'Add tracking domain';
-  }
-  return false;
+    if (!r.ok) { var d = await r.json(); throw new Error(d.error || 'Failed'); }
+    location.href = '/portal/track-domains';
+  } catch(err) { alert('Error: ' + err.message); btn.textContent = '<%= td ? "Save Track Domain" : "Create Track Domain" %>'; btn.disabled = false; }
 }
 </script>

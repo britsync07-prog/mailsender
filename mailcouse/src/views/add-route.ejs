@@ -1,117 +1,136 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr; Routes &rarr;</span>
-    Add route
-  </h1>
-</div>
-
-<nav class="navBar navBar--secondary">
+<%- include('partials/server-header', { activeNav: 'routing', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<nav class="navBar">
   <ul>
-    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routes</a></li>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link is-active">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
-  <form action="/api/portal/routes" method="POST" onsubmit="return addRoute(event)">
+  <% var rt = typeof route !== 'undefined' ? route : null; %>
+<form id="route-form" action="/api/portal/routes<%= rt ? '/' + rt.id : '' %>" method="POST" remote="true">
     <fieldset class="fieldSet">
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="route-name">Route name</label>
+        <label class="fieldSet__label" for="route_name">Name</label>
         <div class="fieldSet__input">
-          <input type="text" id="route-name" name="name" class="input input--text" autofocus placeholder="example.com">
-          <p class="fieldSet__text">The domain name to match incoming mail for (use * for all domains).</p>
+          <div class="routeNameInput">
+            <input type="text" id="route_name" name="name" autofocus="autofocus" class="input input--text routeNameInput__name" value="<%= rt ? rt.description : '' %>" placeholder="mailing-list">
+            <span class="routeNameInput__at">@</span>
+            <select id="route_domain_id" name="domain" class="input input--select routeNameInput__domain">
+              <option value="">(no domain)</option>
+              <% domains.forEach(function(d) { %>
+                <option value="<%= d.domain %>" <%= rt && rt.domain === d.domain ? 'selected' : '' %>><%= d.domain %></option>
+              <% }); %>
+            </select>
+          </div>
+          <p class="fieldSet__text">
+            Enter the address you wish to route. In addition to the name you enter, you'll also received "tagged" mail for this
+            address. See our documentation for details about tagged mail.
+          </p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="endpoint-type">Endpoint type</label>
+        <label class="fieldSet__label" for="route__endpoint">Endpoint</label>
         <div class="fieldSet__input">
-          <select id="endpoint-type" name="endpoint_type" class="input input--select">
-            <option value="HTTP">HTTP Endpoint</option>
-            <option value="SMTP">SMTP Endpoint</option>
-            <option value="Address">Address Endpoint</option>
+          <select id="route__endpoint" name="endpoint_type" class="input input--select" onchange="toggleEndpoint(this.value)">
+            <option value="HTTP" <%= (!rt || rt.endpoint_type === 'HTTP') ? 'selected' : '' %>>HTTP endpoint</option>
+            <option value="SMTP" <%= rt && rt.endpoint_type === 'SMTP' ? 'selected' : '' %>>SMTP endpoint</option>
+            <option value="Address" <%= rt && rt.endpoint_type === 'Address' ? 'selected' : '' %>>Address endpoint</option>
+            <option value="None" <%= rt && !rt.endpoint_type ? 'selected' : '' %>>No endpoint</option>
           </select>
+          <p class="fieldSet__text">
+            This is the endpoint where mail to this address will be delivered to.
+          </p>
+        </div>
+      </div>
+      <div class="fieldSet__field" id="http-field">
+        <label class="fieldSet__label" for="route_http_url">HTTP URL</label>
+        <div class="fieldSet__input">
+          <input type="text" id="route_http_url" name="http_url" class="input input--text" placeholder="https://example.com/webhook" value="<%= rt && rt.endpoint_type === 'HTTP' ? rt.endpoint : '' %>">
+        </div>
+      </div>
+      <div class="fieldSet__field is-hidden" id="smtp-field">
+        <label class="fieldSet__label" for="route_smtp_host">SMTP Host:Port</label>
+        <div class="fieldSet__input">
+          <input type="text" id="route_smtp_host" name="smtp_host" class="input input--text" placeholder="smtp.example.com" value="<%= rt && rt.endpoint_type === 'SMTP' ? rt.endpoint.split(':')[0] : '' %>">
+          <input type="number" id="route_smtp_port" name="smtp_port" class="input input--text" placeholder="587" value="<%= rt && rt.endpoint_type === 'SMTP' && rt.endpoint.split(':')[1] ? rt.endpoint.split(':')[1] : 587 %>">
+        </div>
+      </div>
+      <div class="fieldSet__field is-hidden" id="address-field">
+        <label class="fieldSet__label" for="route_address">Email Address</label>
+        <div class="fieldSet__input">
+          <input type="text" id="route_address" name="address" class="input input--text" placeholder="user@example.com" value="<%= rt && rt.endpoint_type === 'Address' ? rt.endpoint : '' %>">
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="route_spam_mode">Spam Mode</label>
+        <div class="fieldSet__input">
+          <select id="route_spam_mode" name="spam_mode" class="input input--select">
+            <option value="Mark" <%= !rt || rt.spam_mode === 'Mark' ? 'selected' : '' %>>Mark</option>
+            <option value="Quarantine" <%= rt && rt.spam_mode === 'Quarantine' ? 'selected' : '' %>>Quarantine</option>
+            <option value="Fail" <%= rt && rt.spam_mode === 'Fail' ? 'selected' : '' %>>Fail</option>
+          </select>
+          <p class="fieldSet__text">
+            You can choose what should happen to mail which we identify as spam. If you choose <b>Mark</b> we'll tell you
+            we think its spam when we deliver it to your endpoint. If you choose <b>Quarantine</b>, we won't send the message
+            to you at all and you'll have manually accept it through our web interface or the API if you want it delivered.
+            If you choose <b>Fail</b>, the message will simply be failed without any attempt to deliver your message.
+          </p>
         </div>
       </div>
     </fieldset>
-
-    <div id="http-config" class="fieldSet">
-      <div class="fieldSet__field">
-        <label class="fieldSet__label" for="http-url">URL</label>
-        <div class="fieldSet__input">
-          <input type="text" id="http-url" name="http_url" class="input input--text" placeholder="https://hooks.example.com/email">
-        </div>
-      </div>
+    <div class="fieldSetSubmit buttonSet">
+      <input type="submit" value="<%= rt ? 'Save route' : 'Create route' %>" class="button button--positive js-form-submit">
+      <% if (rt) { %>
+        <span class="fieldSetSubmit__delete">
+          <a href="javascript:deleteRoute('<%= rt.id %>')" class="button button--danger">Delete route</a>
+        </span>
+      <% } %>
     </div>
-
-    <div id="smtp-config" class="fieldSet u-hide">
-      <div class="fieldSet__field">
-        <label class="fieldSet__label" for="smtp-host">SMTP Host</label>
-        <div class="fieldSet__input">
-          <input type="text" id="smtp-host" name="smtp_host" class="input input--text" placeholder="smtp.example.com">
-        </div>
-      </div>
-      <div class="fieldSet__field">
-        <label class="fieldSet__label" for="smtp-port">SMTP Port</label>
-        <div class="fieldSet__input">
-          <input type="number" id="smtp-port" name="smtp_port" class="input input--text" value="587" style="width:100px">
-        </div>
-      </div>
-    </div>
-
-    <div id="address-config" class="fieldSet u-hide">
-      <div class="fieldSet__field">
-        <label class="fieldSet__label" for="address">Address</label>
-        <div class="fieldSet__input">
-          <input type="text" id="address" name="address" class="input input--text" placeholder="user@example.com">
-        </div>
-      </div>
-    </div>
-
-    <p class="fieldSetSubmit buttonSet">
-      <button type="submit" class="button button--positive js-form-submit" id="add-btn">Add route</button>
-      <a href="/portal/routes" class="button button--neutral">Cancel</a>
-    </p>
   </form>
 </div>
-
 <script>
-document.getElementById('endpoint-type').addEventListener('change', function() {
-  document.getElementById('http-config').classList.toggle('u-hide', this.value !== 'HTTP');
-  document.getElementById('smtp-config').classList.toggle('u-hide', this.value !== 'SMTP');
-  document.getElementById('address-config').classList.toggle('u-hide', this.value !== 'Address');
-});
-
-async function addRoute(e) {
-  e.preventDefault();
-  var btn = document.getElementById('add-btn');
-  btn.disabled = true;
-  btn.textContent = 'Adding...';
-
-  var body = {
-    name: document.getElementById('route-name').value.trim(),
-    endpoint_type: document.getElementById('endpoint-type').value
-  };
-
-  if (body.endpoint_type === 'HTTP') body.http_url = document.getElementById('http-url').value.trim();
-  if (body.endpoint_type === 'SMTP') {
-    body.smtp_host = document.getElementById('smtp-host').value.trim();
-    body.smtp_port = document.getElementById('smtp-port').value;
-  }
-  if (body.endpoint_type === 'Address') body.address = document.getElementById('address').value.trim();
-
-  try {
-    var r = await fetch('/api/portal/routes', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
-      body: JSON.stringify(body)
-    });
-    var data = await r.json();
-    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add route'; return false; }
-    window.location.href = '/portal/routes';
-  } catch(e) {
-    alert('Error: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = 'Add route';
-  }
-  return false;
+function toggleEndpoint(type) {
+  document.getElementById('http-field').classList.toggle('is-hidden', type !== 'HTTP');
+  document.getElementById('smtp-field').classList.toggle('is-hidden', type !== 'SMTP');
+  document.getElementById('address-field').classList.toggle('is-hidden', type !== 'Address');
 }
+(function() {
+  var token = 'Bearer <%= token %>';
+  toggleEndpoint(document.getElementById('route__endpoint').value);
+  var form = document.getElementById('route-form');
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var btn = form.querySelector('.js-form-submit');
+    btn.disabled = true;
+    var payload = {
+      name: form.name.value,
+      domain: form.domain.value,
+      endpoint_type: form.endpoint_type.value,
+      http_url: form.http_url.value,
+      smtp_host: form.smtp_host.value,
+      smtp_port: form.smtp_port.value,
+      address: form.address.value,
+      spam_mode: form.spam_mode.value
+    };
+    fetch(form.action, {
+      method: <%= rt ? "'PUT'" : "'POST'" %>,
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
+      body: JSON.stringify(payload)
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.id || d.message) { window.location.href = '/portal/routes'; }
+      else { alert(d.error || 'Failed'); btn.disabled = false; }
+    }).catch(function() { btn.disabled = false; });
+  });
+  window.deleteRoute = function(id) {
+    if (!confirm('Are you sure you wish to delete this route?')) return;
+    fetch('/api/portal/routes/' + id, { method: 'DELETE', headers: { 'Authorization': token } })
+      .then(function() { window.location.href = '/portal/routes'; });
+  };
+})();
 </script>

@@ -1,85 +1,120 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr; Webhooks &rarr;</span>
-    Add webhook
-  </h1>
+<% var wh = typeof webhook !== 'undefined' ? webhook : null; %>
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
+  </div>
 </div>
-
-<nav class="navBar navBar--secondary">
+<nav class="navBar">
   <ul>
-    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link is-active">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
   </ul>
 </nav>
-
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Manage Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks/history" class="navBar__link">View History</a></li>
+  </ul>
+</nav>
 <div class="pageContent pageContent--compact">
-  <form action="/api/portal/webhooks" method="POST" onsubmit="return addWebhook(event)">
+  <form id="webhook-form" onsubmit="saveWebhook(event)">
     <fieldset class="fieldSet">
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="webhook-url">URL</label>
+        <label class="fieldSet__label">Name</label>
         <div class="fieldSet__input">
-          <input type="text" id="webhook-url" name="url" class="input input--text" autofocus placeholder="https://hooks.example.com/email">
-          <p class="fieldSet__text">The URL we'll send the request to.</p>
+          <input type="text" id="wh-name" class="input input--text" autofocus value="<%= wh ? wh.name : '' %>">
+          <p class="fieldSet__text">Enter a name to describe this webhook. This is used so you can identify this webhook later in the web interface.</p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="http-method">HTTP method</label>
+        <label class="fieldSet__label">URL</label>
         <div class="fieldSet__input">
-          <select id="http-method" name="http_method" class="input input--select" style="width:120px">
-            <option value="POST">POST</option>
-            <option value="PUT">PUT</option>
+          <input type="text" id="wh-url" class="input input--text" value="<%= wh ? wh.endpoint_url : '' %>">
+          <p class="fieldSet__text">Enter the URL that you'd like us to send requests to. All requests will be POST requests with a JSON-encoded payload in the body of the request.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Enabled</label>
+        <div class="fieldSet__input">
+          <select id="wh-enabled" class="input input--select">
+            <option value="true" <%= !wh || wh.enabled ? 'selected' : '' %>>Yes - send requests to this webhook</option>
+            <option value="false" <%= wh && wh.enabled === false ? 'selected' : '' %>>No - do not send requests at the moment</option>
           </select>
+          <p class="fieldSet__text">You can enable or disable this webhook without fully removing it from the system. If there are any outstanding webhook deliveries, they will still be completed even if disabled.</p>
         </div>
       </div>
       <div class="fieldSet__field">
         <label class="fieldSet__label">Events</label>
         <div class="fieldSet__input">
-          <label class="checkbox"><input type="checkbox" name="events" value="Send" checked> Send</label>
-          <label class="checkbox"><input type="checkbox" name="events" value="Open" checked> Open</label>
-          <label class="checkbox"><input type="checkbox" name="events" value="Click" checked> Click</label>
-          <label class="checkbox"><input type="checkbox" name="events" value="Bounce" checked> Bounce</label>
-          <label class="checkbox"><input type="checkbox" name="events" value="Complaint" checked> Complaint</label>
-          <label class="checkbox"><input type="checkbox" name="events" value="Hold"> Hold</label>
-          <label class="checkbox"><input type="checkbox" name="events" value="Unsubscribe"> Unsubscribe</label>
-          <label class="checkbox"><input type="checkbox" name="events" value="Reject"> Reject</label>
-          <p class="fieldSet__text">The events you'd like to be notified of.</p>
+          <% var whAllEvents = !wh || !wh.events || wh.events.indexOf('*') >= 0; %>
+          <select id="wh-all-events" class="input input--select fieldSet__checkboxListAfter js-checkbox-list-toggle" onchange="toggleEvents(this)">
+            <option value="true" <%= whAllEvents ? 'selected' : '' %>>Yes - send all events to this URL</option>
+            <option value="false" <%= !whAllEvents ? 'selected' : '' %>>No - I'll choose which requests to send</option>
+          </select>
+          <ul class="checkboxList <%= whAllEvents ? 'is-hidden' : '' %>" id="wh-events-list">
+            <% var postalEvents = ['MessageSent','MessageDelayed','MessageDeliveryFailed','MessageHeld','MessageBounced','MessageLinkClicked','MessageLoaded','DomainDNSError']; %>
+            <% postalEvents.forEach(function(ev) { %>
+              <li class="checkboxList__item">
+                <div class="checkboxList__checkbox"><input type="checkbox" id="event_<%= ev %>" class="js-event-checkbox" value="<%= ev %>" <%= wh && wh.events && wh.events.indexOf(ev) >= 0 ? 'checked' : '' %>></div>
+                <div class="checkboxList__label">
+                  <label for="event_<%= ev %>" class="checkboxList__actualLabel checkboxList__devEvent"><%= ev %></label>
+                  <p class="checkBoxList__text"><%= { 'MessageSent': 'An e-mail has been successfully delivered to its endpoint (either SMTP or HTTP).', 'MessageDelayed': 'An e-mail has been delayed due to an issue with the receiving endpoint. It will be retried automatically.', 'MessageDeliveryFailed': 'An e-mail cannot be delivered to its endpoint. This is a permanent failure so it will no be retried.', 'MessageHeld': 'An e-mail has been held in Postal. This will be because a limit has been reached or your server is in development mode.', 'MessageBounced': 'We received a bounce message in response to an email which had previously been successfully sent.', 'MessageLinkClicked': 'A link in one of your outbound messages has been clicked.', 'MessageLoaded': 'A message you have sent has been loaded.', 'DomainDNSError': 'This will be triggered when we detect an issue with the DNS configuration for any domain for this server.' }[ev] %></p>
+                </div>
+              </li>
+            <% }) %>
+          </ul>
         </div>
       </div>
     </fieldset>
-    <p class="fieldSetSubmit buttonSet">
-      <button type="submit" class="button button--positive js-form-submit" id="add-btn">Add webhook</button>
-      <a href="/portal/webhooks" class="button button--neutral">Cancel</a>
-    </p>
+    <div class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit"><%= wh ? 'Save Webhook' : 'Create Webhook' %></button>
+      <% if (wh) { %>
+        <span class="fieldSetSubmit__delete"><a href="javascript:deleteWebhook()" class="button button--danger">Delete Webhook</a></span>
+      <% } %>
+    </div>
   </form>
 </div>
-
 <script>
-async function addWebhook(e) {
+function toggleEvents(sel) {
+  var list = document.getElementById('wh-events-list');
+  list.classList.toggle('is-hidden', sel.value === 'true');
+}
+async function saveWebhook(e) {
   e.preventDefault();
-  var btn = document.getElementById('add-btn');
-  btn.disabled = true;
-  btn.textContent = 'Adding...';
-
-  var events = [];
-  document.querySelectorAll('input[name="events"]:checked').forEach(function(cb) { events.push(cb.value); });
-
+  var btn = document.querySelector('#webhook-form .js-form-submit');
+  btn.textContent = 'Saving...'; btn.disabled = true;
   try {
-    var r = await fetch('/api/portal/webhooks', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
-      body: JSON.stringify({
-        url: document.getElementById('webhook-url').value.trim(),
-        http_method: document.getElementById('http-method').value,
-        events: events
-      })
+    var allEvents = document.getElementById('wh-all-events').value === 'true';
+    var events = allEvents ? ['*'] : Array.from(document.querySelectorAll('.js-event-checkbox:checked')).map(function(cb) { return cb.value; });
+    var body = {
+      name: document.getElementById('wh-name').value,
+      endpoint_url: document.getElementById('wh-url').value,
+      enabled: document.getElementById('wh-enabled').value === 'true',
+      events: events
+    };
+    var url = '<%= wh ? "/api/portal/webhooks/" + wh.id : "/api/portal/webhooks" %>';
+    var r = await fetch(url, {
+      method:'<%= wh ? "PUT" : "POST" %>',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer <%= token %>'},
+      body:JSON.stringify(body)
     });
-    var data = await r.json();
-    if (!r.ok) { alert(data.error); btn.disabled = false; btn.textContent = 'Add webhook'; return false; }
-    window.location.href = '/portal/webhooks';
-  } catch(e) {
-    alert('Error: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = 'Add webhook';
-  }
-  return false;
+    if (!r.ok) { var d = await r.json(); throw new Error(d.error || 'Failed'); }
+    location.href = '/portal/webhooks';
+  } catch(err) { alert('Error: ' + err.message); btn.textContent = '<%= wh ? "Save Webhook" : "Create Webhook" %>'; btn.disabled = false; }
+}
+async function deleteWebhook() {
+  if (!confirm('Are you sure you wish to delete this webhook?')) return;
+  await fetch('<%= wh ? "/api/portal/webhooks/" + wh.id : "" %>', { method:'DELETE', headers:{'Authorization':'Bearer <%= token %>'} });
+  location.href = '/portal/webhooks';
 }
 </script>

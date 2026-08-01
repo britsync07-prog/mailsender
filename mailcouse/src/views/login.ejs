@@ -1,37 +1,20 @@
-<div class="subPageBox__title"><%= title %></div>
+<div class="subPageBox__title">Welcome to Postal</div>
 <div class="subPageBox__content">
-<% if (typeof error !== 'undefined' && error) { %>
-  <div class="loginForm__error"><%= error %></div>
+<% if (typeof flash !== 'undefined' && flash) { %>
+  <div class="flashMessage<%= flash.type === 'notice' ? ' flashMessage--notice' : '' %>"><%= flash.message %></div>
 <% } %>
-
-<form action="/<%= mode %>" method="POST">
-  <% if (mode === 'signup') { %>
+<form action="/login" method="POST" class="loginForm">
   <div class="loginForm__input">
-    <label for="name">Full Name</label>
-    <input type="text" id="name" name="name" required placeholder="Your name">
-  </div>
-  <% } %>
-  <div class="loginForm__input">
-    <label for="email">Email address</label>
-    <input type="email" id="email" name="email" required placeholder="you@example.com" autofocus>
+    <input type="email" name="email" class="input input--text input--onWhite" placeholder="Your e-mail address" autofocus>
   </div>
   <div class="loginForm__input">
-    <label for="password">Password</label>
-    <input type="password" id="password" name="password" required placeholder="Password" minlength="8">
+    <input type="password" name="password" class="input input--text input--onWhite" placeholder="Your password">
   </div>
   <div class="loginForm__submit">
-    <button type="submit" class="button button--full">
-      <%= mode === 'login' ? 'Sign In' : 'Create Account' %>
-    </button>
+    <ul class="loginForm__links">
+      <li><a href="/login/reset">Forgotten your password?</a></li>
+    </ul>
+    <button type="submit" class="button button--positive">Login</button>
   </div>
 </form>
-
-<div class="loginForm__divider"></div>
-<p class="loginForm__localTitle">
-  <% if (mode === 'login') { %>
-    Don't have an account? <a href="/signup" class="u-link">Sign up</a>
-  <% } else { %>
-    Already have an account? <a href="/login" class="u-link">Sign in</a>
-  <% } %>
-</p>
 </div>

@@ -7,9 +7,9 @@ import { DKIMKeyPair } from './types';
  * Generate a new DKIM key pair
  */
 export function generateKeyPair(selector?: string): DKIMKeyPair {
-  // Generate RSA 2048-bit key pair
+  // Generate RSA 1024-bit key pair (Postal uses OpenSSL::PKey::RSA.new(1024))
   const { publicKey, privateKey } = generateKeyPairSync('rsa', {
-    modulusLength: 2048,
+    modulusLength: 1024,
     publicKeyEncoding: {
       type: 'spki',
       format: 'pem',

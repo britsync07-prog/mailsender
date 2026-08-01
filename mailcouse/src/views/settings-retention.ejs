@@ -1,10 +1,24 @@
-<div class="pageHeader">
-  <div class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Server &rarr;</span>
-    Message Retention
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
   </div>
 </div>
-
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link is-active">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
 <nav class="navBar navBar--secondary">
   <ul>
     <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Server Settings</a></li>
@@ -15,35 +29,29 @@
     <li class="navBar__item"><a href="/portal/settings/delete" class="navBar__link">Delete</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
-  <p class="pageContent__intro u-margin">
-    The length of time that messages are stored by us are shown below. If you need
-    to store messages for longer, please contact us and we can work out a custom
-    plan.
-  </p>
-
+  <p class="pageContent__intro u-margin">The length of time that messages are stored by us are shown below. If you need to store messages for longer, please contact us and we can work out a custom plan.</p>
   <div class="retentionLimits">
-    <dl class="retentionLimits__limit">
-      <dt class="retentionLimits__label">Number of days that raw message data will be stored</dt>
-      <dd class="retentionLimits__info">
-        <p class="retentionLimits__value"><%= server.raw_message_retention_days ? server.raw_message_retention_days + ' days' : 'Indefinitely' %></p>
-        <p class="retentionLimits__text">This is the number of whole days that raw message content will be stored by us. Raw message is the actual content of the message including headers & attachments.</p>
-      </dd>
-    </dl>
-    <dl class="retentionLimits__limit">
-      <dt class="retentionLimits__label">Volume of raw message data that will be stored</dt>
-      <dd class="retentionLimits__info">
-        <p class="retentionLimits__value"><%= server.raw_message_retention_size ? (server.raw_message_retention_size / 1024).toFixed(1) + ' GB' : 'No limit' %></p>
-        <p class="retentionLimits__text">This is the amount of e-mail that can be stored. When you exceed this amount, messages will be removed in whole day increments starting with the oldest stored day.</p>
-      </dd>
-    </dl>
-    <dl class="retentionLimits__limit">
-      <dt class="retentionLimits__label">Number of days of message meta data will be available</dt>
-      <dd class="retentionLimits__info">
-        <p class="retentionLimits__value"><%= server.message_retention_days ? server.message_retention_days + ' days' : 'Indefinitely' %></p>
-        <p class="retentionLimits__text">This is the number of days of messages that will be available through the web interface. You will be able to view basic meta information & delivery details but raw data might not be available unless it is within the retention periods above.</p>
-      </dd>
-    </dl>
+    <div class="retentionLimits__limit">
+      <div class="retentionLimits__label">Number of days that raw message data will be stored</div>
+      <div class="retentionLimits__info">
+        <div class="retentionLimits__value"><%= server.raw_message_retention_days ? server.raw_message_retention_days + ' days' : 'Indefinitely' %></div>
+        <div class="retentionLimits__text">This is the number of whole days that raw message content will be stored by us. Raw message is the actual content of the message including headers &amp; attachments.</div>
+      </div>
+    </div>
+    <div class="retentionLimits__limit">
+      <div class="retentionLimits__label">Volume of raw message data that will be stored</div>
+      <div class="retentionLimits__info">
+        <div class="retentionLimits__value"><%= server.raw_message_retention_size ? humanSize(server.raw_message_retention_size * 1024 * 1024) : 'No limit' %></div>
+        <div class="retentionLimits__text">This is the amount of e-mail that can be stored. When you exceed this amount, messages will be removed in whole day increments starting with the oldest stored day.</div>
+      </div>
+    </div>
+    <div class="retentionLimits__limit">
+      <div class="retentionLimits__label">Number of days of message meta data will be available</div>
+      <div class="retentionLimits__info">
+        <div class="retentionLimits__value"><%= server.message_retention_days ? server.message_retention_days + ' days' : 'Indefinitely' %></div>
+        <div class="retentionLimits__text">This is the number of days of messages that will be available through the web interface. You will be able to view basic meta information &amp; delivery details but raw data might not be available unless it is within the retention periods above.</div>
+      </div>
+    </div>
   </div>
 </div>

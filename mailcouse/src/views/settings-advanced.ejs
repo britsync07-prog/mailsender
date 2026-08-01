@@ -1,10 +1,24 @@
-<div class="pageHeader">
-  <div class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Server &rarr;</span>
-    Advanced Settings
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
   </div>
 </div>
-
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link is-active">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
 <nav class="navBar navBar--secondary">
   <ul>
     <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Server Settings</a></li>
@@ -15,106 +29,135 @@
     <li class="navBar__item"><a href="/portal/settings/delete" class="navBar__link">Delete</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
-  <form action="/api/portal/settings/advanced" method="POST" id="advanced-settings-form" onsubmit="return saveAdvancedSettings(event)">
+  <form id="advanced-form" class="u-margin" onsubmit="saveAdvanced(event)">
     <fieldset class="fieldSet fieldSet--wide">
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="send_limit">Send limit</label>
+        <label class="fieldSet__label">Send limit</label>
         <div class="fieldSet__input">
-          <input type="text" name="send_limit" id="send_limit" class="input input--text" value="<%= server.send_limit || '' %>" placeholder="No limit">
+          <input type="text" id="send-limit" class="input input--text" placeholder="No limit" value="<%= server.send_limit || '' %>">
           <p class="fieldSet__text">This is the maximum number of e-mails that can be sent through this mail server in a 60 minute period.</p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="allow_sender">Allow sender header</label>
+        <label class="fieldSet__label">Allow sender header</label>
         <div class="fieldSet__input">
-          <select name="allow_sender" id="allow_sender" class="input input--select">
-            <option value="false" <%= server.allow_sender === false || !server.allow_sender ? 'selected' : '' %>>No</option>
-            <option value="true" <%= server.allow_sender ? 'selected' : '' %>>Yes - can use Sender header</option>
+          <select id="allow-sender" class="input input--select">
+            <option value="false" <%= server.allow_sender === false ? 'selected' : '' %>>No</option>
+            <option value="true" <%= server.allow_sender === true ? 'selected' : '' %>>Yes - can use Sender header</option>
           </select>
           <p class="fieldSet__text">If enabled, outgoing messages can use any address in the From header as long as a Sender header is included with an authorized address.</p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="privacy_mode">Privacy mode</label>
+        <label class="fieldSet__label">Privacy mode</label>
         <div class="fieldSet__input">
-          <select name="privacy_mode" id="privacy_mode" class="input input--select">
-            <option value="false" <%= server.privacy_mode === false || !server.privacy_mode ? 'selected' : '' %>>Disabled</option>
-            <option value="true" <%= server.privacy_mode ? 'selected' : '' %>>Enabled</option>
+          <select id="privacy-mode" class="input input--select">
+            <option value="false" <%= server.privacy_mode === false ? 'selected' : '' %>>Disabled</option>
+            <option value="true" <%= server.privacy_mode === true ? 'selected' : '' %>>Enabled</option>
           </select>
-          <p class="fieldSet__text">If enabled, when adding Received headers to e-mails it will not include IP or hostname information of the client submitting the message.</p>
+          <p class="fieldSet__text">If enabled, when Postal adds Received headers to e-mails it will not include IP or hostname information of the client submitting the message.</p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="message_retention_days">Message retention days</label>
+        <label class="fieldSet__label">Log SMTP data?</label>
         <div class="fieldSet__input">
-          <input type="text" name="message_retention_days" id="message_retention_days" class="input input--text" value="<%= server.message_retention_days || '' %>">
+          <select id="log-smtp-data" class="input input--select">
+            <option value="false" <%= server.log_smtp_data === false ? 'selected' : '' %>>No</option>
+            <option value="true" <%= server.log_smtp_data === true ? 'selected' : '' %>>Yes - log all SMTP DATA (debug only)</option>
+          </select>
+          <p class="fieldSet__text">By default, no information after the DATA command in an SMTP command is logged. If enabled, all this data will be logged too. This should only be used for debugging.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Outbound spam threshold</label>
+        <div class="fieldSet__input">
+          <input type="text" id="outbound-spam-threshold" class="input input--text" placeholder="No outbound spam checking" value="<%= server.outbound_spam_threshold || '' %>">
+          <p class="fieldSet__text">By default, outgoing messages aren't scanned for spam. You can specify a threshold here and outgoing messages that exceed this will not be permitted to be sent through the mail server.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Message retention days</label>
+        <div class="fieldSet__input">
+          <input type="text" id="message-retention-days" class="input input--text" value="<%= server.message_retention_days || '' %>">
           <p class="fieldSet__text">The number of days that message meta data is stored in the database after it has been added.</p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="raw_message_retention_days">Raw message retention days</label>
+        <label class="fieldSet__label">Raw message retention days</label>
         <div class="fieldSet__input">
-          <input type="text" name="raw_message_retention_days" id="raw_message_retention_days" class="input input--text" value="<%= server.raw_message_retention_days || '' %>">
-          <p class="fieldSet__text">The number of days that raw message data (bodies & attachments) are stored in the database after it has been added.</p>
+          <input type="text" id="raw-message-retention-days" class="input input--text" value="<%= server.raw_message_retention_days || '' %>">
+          <p class="fieldSet__text">The number of days that raw message data (bodies &amp; attachments) are stored in the database after it has been added.</p>
         </div>
       </div>
       <div class="fieldSet__field">
-        <label class="fieldSet__label" for="raw_message_retention_size">Raw message retention size</label>
+        <label class="fieldSet__label">Raw message retention size</label>
         <div class="fieldSet__input">
-          <input type="text" name="raw_message_retention_size" id="raw_message_retention_size" class="input input--text" value="<%= server.raw_message_retention_size || '' %>">
+          <input type="text" id="raw-message-retention-size" class="input input--text" value="<%= server.raw_message_retention_size || '' %>">
           <p class="fieldSet__text">The total amount of disk space (in megabytes) to allow raw message data to use on the disk. Older messages will be deleted to keep the total usage below this amount.</p>
         </div>
       </div>
     </fieldset>
     <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
-      <input type="submit" value="Save server" class="button button--positive js-form-submit">
+      <button type="submit" class="button button--positive js-form-submit">Save server</button>
     </div>
   </form>
 
-  <hr style="margin:30px 0;border:none;border-top:1px solid #e0e0e0;">
-
   <% if (server.suspended_at) { %>
-    <form action="/api/portal/settings/unsuspend" method="POST">
-      <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
-        <input type="submit" value="Unsuspend server" class="button button--danger js-form-submit">
-      </div>
-    </form>
+  <form onsubmit="unsuspendServer(event)">
+    <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
+      <button type="submit" class="button button--danger js-form-submit">Unsuspend server</button>
+    </div>
+  </form>
   <% } else { %>
-    <form action="/api/portal/settings/suspend" method="POST" onsubmit="return confirm('Are you sure you wish to suspend this server?')">
-      <fieldset class="fieldSet fieldSet--wide">
-        <div class="fieldSet__field">
-          <label class="fieldSet__label" for="suspension_reason">Suspension Reason</label>
-          <div class="fieldSet__input">
-            <input type="text" name="reason" id="suspension_reason" class="input input--text" required>
-            <p class="fieldSet__text">If you wish to disable this server and stop it sending messages, enter a reason above. Any users assigned to the server will be notified of the suspension by e-mail.</p>
-          </div>
+  <form onsubmit="suspendServer(event)">
+    <fieldset class="fieldSet fieldSet--wide">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Suspension Reason</label>
+        <div class="fieldSet__input">
+          <input type="text" id="suspend-reason" class="input input--text" required>
+          <p class="fieldSet__text">If you wish to disable this server and stop it sending messages, enter a reason above. Any users assigned to the server will be notified of the suspension by e-mail.</p>
         </div>
-      </fieldset>
-      <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
-        <input type="submit" value="Suspend server" class="button button--positive js-form-submit">
       </div>
-    </form>
+    </fieldset>
+    <div class="fieldSetSubmit fieldSetSubmit--wide buttonSet">
+      <button type="submit" class="button button--positive js-form-submit">Suspend server</button>
+    </div>
+  </form>
   <% } %>
 </div>
-
 <script>
-async function saveAdvancedSettings(event) {
-  event.preventDefault();
-  var form = event.target;
-  var btn = form.querySelector('.js-form-submit');
-  btn.disabled = true; btn.value = 'Saving...';
+async function saveAdvanced(e) {
+  e.preventDefault();
+  var btn = document.querySelector('#advanced-form .js-form-submit');
+  btn.textContent = 'Saving...'; btn.disabled = true;
   try {
-    var fd = new FormData(form);
-    var data = {};
-    for (var pair of fd.entries()) data[pair[0]] = pair[1];
-    var res = await fetch('/api/portal/settings/advanced', { method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify(data)
+    await fetch('/api/portal/settings/advanced', {
+      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer <%= token %>'},
+      body:JSON.stringify({
+        send_limit:document.getElementById('send-limit').value,
+        allow_sender:document.getElementById('allow-sender').value,
+        privacy_mode:document.getElementById('privacy-mode').value,
+        log_smtp_data:document.getElementById('log-smtp-data').value,
+        outbound_spam_threshold:document.getElementById('outbound-spam-threshold').value,
+        message_retention_days:document.getElementById('message-retention-days').value,
+        raw_message_retention_days:document.getElementById('raw-message-retention-days').value,
+        raw_message_retention_size:document.getElementById('raw-message-retention-size').value
+      })
     });
-    if (res.ok) { btn.value = 'Saved'; setTimeout(function() { btn.value = 'Save server'; btn.disabled = false; }, 2000); }
-    else { var j = await res.json(); alert(j.error); btn.disabled = false; btn.value = 'Save server'; }
-  } catch(e) { alert('Error: ' + e.message); btn.disabled = false; btn.value = 'Save server'; }
+    btn.textContent = 'Saved!';
+    setTimeout(function() { btn.textContent = 'Save server'; btn.disabled = false; }, 2000);
+  } catch(err) { alert('Error: ' + err.message); btn.textContent = 'Save server'; btn.disabled = false; }
+}
+async function suspendServer(e) {
+  e.preventDefault();
+  var reason = document.getElementById('suspend-reason').value;
+  await fetch('/api/portal/settings/suspend', { method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer <%= token %>'}, body:JSON.stringify({reason:reason}) });
+  location.reload();
+}
+async function unsuspendServer(e) {
+  e.preventDefault();
+  await fetch('/api/portal/settings/unsuspend', { method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer <%= token %>'}, body:'{}' });
+  location.reload();
 }
 </script>

@@ -450,6 +450,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     name VARCHAR(100) NOT NULL,
     admin BOOLEAN NOT NULL DEFAULT false,
+    reset_token_hash VARCHAR(255),
+    reset_token_expires_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -492,7 +494,7 @@ CREATE TABLE IF NOT EXISTS customer_domains (
     dns_checked_at TIMESTAMP,
     outgoing BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE(domain)
+    UNIQUE(organization_id, domain)
 );
 
 CREATE INDEX IF NOT EXISTS idx_customer_domains_org_id ON customer_domains(organization_id);
@@ -530,6 +532,10 @@ CREATE TABLE IF NOT EXISTS sent_messages (
     message_id VARCHAR(255),
     scope VARCHAR(20) NOT NULL DEFAULT 'outgoing',
     status VARCHAR(50) NOT NULL DEFAULT 'queued',
+    spam_score DECIMAL(8,2),
+    spam_status VARCHAR(20) NOT NULL DEFAULT 'not_checked',
+    tag VARCHAR(255),
+    spam_checks JSONB,
     bounce TEXT,
     size INTEGER DEFAULT 0,
     sent_at TIMESTAMP,
@@ -594,6 +600,8 @@ CREATE TABLE IF NOT EXISTS servers (
     privacy_mode BOOLEAN NOT NULL DEFAULT false,
     log_smtp_data BOOLEAN NOT NULL DEFAULT false,
     outbound_spam_threshold DECIMAL(5,2),
+    spam_threshold DECIMAL(8,2) NOT NULL DEFAULT 5,
+    spam_failure_threshold DECIMAL(8,2) NOT NULL DEFAULT 20,
     message_retention_days INTEGER,
     raw_message_retention_days INTEGER,
     raw_message_retention_size INTEGER,
@@ -616,6 +624,8 @@ CREATE TABLE IF NOT EXISTS routes (
     match_value VARCHAR(255),
     action_type VARCHAR(50) NOT NULL DEFAULT 'webhook',
     action_value TEXT,
+    spam_mode VARCHAR(20) NOT NULL DEFAULT 'Mark',
+    mode VARCHAR(20) NOT NULL DEFAULT 'Endpoint',
     priority INTEGER NOT NULL DEFAULT 10,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -649,6 +659,9 @@ CREATE TABLE IF NOT EXISTS track_domains (
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     domain VARCHAR(255) NOT NULL UNIQUE,
     ssl_enabled BOOLEAN NOT NULL DEFAULT true,
+    track_loads BOOLEAN NOT NULL DEFAULT true,
+    track_clicks BOOLEAN NOT NULL DEFAULT true,
+    excluded_click_domains TEXT NOT NULL DEFAULT '',
     dns_verified BOOLEAN NOT NULL DEFAULT false,
     dns_status VARCHAR(20),
     dns_error TEXT,
@@ -671,6 +684,8 @@ CREATE TABLE IF NOT EXISTS webhook_requests (
     status_code INTEGER,
     request_body TEXT,
     response_body TEXT,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    will_retry BOOLEAN NOT NULL DEFAULT false,
     time DECIMAL(10,2),
     log_id VARCHAR(100),
     timestamp TIMESTAMP NOT NULL DEFAULT NOW(),

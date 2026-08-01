@@ -1,0 +1,89 @@
+<%- include('partials/server-header', { activeNav: 'settings', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link is-active">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Server Settings</a></li>
+    <li class="navBar__item"><a href="/portal/settings/spam" class="navBar__link is-active">Spam</a></li>
+    <li class="navBar__item"><a href="/portal/settings/retention" class="navBar__link">Retention</a></li>
+    <li class="navBar__item"><a href="/portal/settings/limits" class="navBar__link">Send Limit</a></li>
+    <li class="navBar__item"><a href="/portal/settings/advanced" class="navBar__link">Advanced Settings</a></li>
+    <li class="navBar__item"><a href="/portal/settings/delete" class="navBar__link">Delete</a></li>
+  </ul>
+</nav>
+<div class="pageContent pageContent--compact">
+  <p class="pageContent__intro u-margin">
+    Postal inspects all incoming messages for spam and other threats. Incoming messages
+    are assigned a score which represents how likely an e-mail is to be spam. From here
+    you can choose at which level you'd like to identify messages as spam.
+  </p>
+
+  <div class="u-margin">
+    <p class="pageContent__subTitle">Incoming Spam Threshold</p>
+    <p class="pageContent__text u-margin">
+      The main spam threshold is what determines whether a message is spam or not. How incoming
+      messages that are detected as spam are processed is determined by the route which the incoming
+      message was sent to. You can choose between marking the message as spam and sending it on to
+      your endpoint, putting it into quarantine (holding it until manually released) or just failing it.
+    </p>
+    <input type="range" class="spamRange" min="-10" max="25" step="0.5" value="<%= spamThreshold %>" data-update="js-spam-threshold-text">
+    <p class="spamRangeLabel">Threshold is currently <b class="js-spam-threshold-text"><%= spamThreshold %></b></p>
+  </div>
+
+  <div class="u-margin">
+    <p class="pageContent__subTitle">Incoming Spam Failure Threshold</p>
+    <p class="pageContent__text u-margin">
+      Any messages which are over your spam failure threshold will fail immediately. This is used
+      to catch messages that we are very sure are spam to avoid needlessly sending them around the place.
+    </p>
+    <input type="range" class="spamRange spamRange--hot" min="10" max="50" step="0.5" value="<%= spamFailureThreshold %>" data-update="js-spam-failure-threshold-text">
+    <p class="spamRangeLabel">Threshold is currently <b class="js-spam-failure-threshold-text"><%= spamFailureThreshold %></b></p>
+  </div>
+
+  <% if (outboundSpamThreshold) { %>
+    <div class="u-margin">
+      <p class="pageContent__subTitle">Outgoing Spam Threshold</p>
+      <p class="pageContent__text u-margin">
+        To prevent abuse of our services, we check outgoing messages to see whether they're likely to be
+        caught as spam by other providers. Messages that score higher than the threshold set by us will
+        not be passed through. If this limit needs adjusting, contact us for assistance.
+        <b>The threshold for this server is currently <%= outboundSpamThreshold %>.</b>
+      </p>
+    </div>
+  <% } %>
+
+  <button id="save-spam-btn" class="button button--positive js-form-submit">Save Spam Thresholds</button>
+</div>
+<script>
+(function() {
+  var token = 'Bearer <%= token %>';
+  var update = document.querySelectorAll('input[data-update]');
+  for (var i = 0; i < update.length; i++) {
+    (function(input) {
+      var label = document.querySelector('.' + input.getAttribute('data-update'));
+      if (label) input.addEventListener('input', function() { label.textContent = input.value; });
+    })(update[i]);
+  }
+  document.getElementById('save-spam-btn').addEventListener('click', function() {
+    var btn = this; btn.disabled = true;
+    fetch('/api/portal/settings/spam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
+      body: JSON.stringify({
+        spam_threshold: document.querySelector('.spamRange').value,
+        spam_failure_threshold: document.querySelector('.spamRange--hot').value
+      })
+    }).then(function() { btn.textContent = 'Saved!'; setTimeout(function() { btn.textContent = 'Save Spam Thresholds'; btn.disabled = false; }, 2000); });
+  });
+})();
+</script>

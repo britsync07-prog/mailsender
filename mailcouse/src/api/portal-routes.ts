@@ -3,6 +3,20 @@ import { query } from '../db/connection';
 import { authenticate, requireOrg } from './auth-middleware';
 import { generateKeyPair, extractPublicKeyBase64 } from '../dkim/key-generator';
 import { encryptPrivateKey, getDomainDKIMPrivateKey } from '../dkim/key-store';
+import { config } from '../config';
+import {
+  VERIFICATION_METHODS,
+  verificationEmailAddresses,
+  generateVerificationToken,
+  generateDKIMIdentifierString,
+  spfRecord,
+  dkimRecord,
+  dkimRecordName,
+  dkimIdentifier,
+  returnPathDomain,
+  dnsVerificationString,
+  checkDomainDNS,
+} from './domain-logic';
 import crypto from 'crypto';
 import * as dns from 'dns';
 import * as net from 'net';
@@ -66,6 +80,18 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       [orgId]
     );
 
+    const domainStats = await query<{ total: string; unverified: string; bad_dns: string }>(
+      `SELECT COUNT(*)::text as total,
+              COUNT(*) FILTER (WHERE verified = false)::text as unverified,
+              COUNT(*) FILTER (WHERE verified = true AND NOT (
+                spf_status = 'OK' AND dkim_status = 'OK'
+                AND (mx_status = 'OK' OR mx_status = 'Missing')
+                AND (return_path_status = 'OK' OR return_path_status = 'Missing')
+              ))::text as bad_dns
+       FROM customer_domains WHERE organization_id = $1`,
+      [orgId]
+    );
+
     let server: { mode: string; suspended: boolean; send_limit: number | null } = { mode: 'live', suspended: false, send_limit: null };
     try {
       const serverResult = await query<{ mode: string; suspended_at: Date | null; send_limit: number | null }>(
@@ -98,6 +124,11 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       },
       recentMessages: recentMessages.rows,
       server: { mode: server.mode, suspended: server.suspended },
+      domain_stats: {
+        total: parseInt(domainStats.rows[0].total),
+        unverified: parseInt(domainStats.rows[0].unverified),
+        bad_dns: parseInt(domainStats.rows[0].bad_dns),
+      },
     });
   } catch (err) {
     console.error('Dashboard error:', err);
@@ -309,8 +340,11 @@ router.post('/send', async (req: Request, res: Response) => {
 router.get('/domains', async (req: Request, res: Response) => {
   try {
     const result = await query(
-      `SELECT id, domain, verified, verified_at, spf_status, dkim_status, mx_status, return_path_status, outgoing, created_at
-       FROM customer_domains WHERE organization_id = $1 ORDER BY created_at DESC`,
+      `SELECT id, domain, verified, verified_at, verification_method, dns_checked_at,
+              spf_status, spf_error, dkim_status, dkim_error,
+              mx_status, mx_error, return_path_status, return_path_error,
+              dkim_identifier_string, outgoing, use_for_any, created_at
+       FROM customer_domains WHERE organization_id = $1 ORDER BY domain ASC`,
       [req.user!.orgId!]
     );
     res.json({ domains: result.rows });
@@ -322,13 +356,17 @@ router.get('/domains', async (req: Request, res: Response) => {
 router.get('/domains/:id/setup', async (req: Request, res: Response) => {
   try {
     const domainResult = await query<{
-      id: string; domain: string; dkim_selector: string;
+      id: string; domain: string; dkim_identifier_string: string;
       dkim_public_key: string; verification_token: string;
-      verified: boolean; spf_status: string; dkim_status: string;
-      mx_status: string; return_path_status: string;
+      verified: boolean; dns_checked_at: Date | null;
+      spf_status: string | null; spf_error: string | null;
+      dkim_status: string | null; dkim_error: string | null;
+      mx_status: string | null; mx_error: string | null;
+      return_path_status: string | null; return_path_error: string | null;
     }>(
-      `SELECT id, domain, dkim_selector, dkim_public_key, verification_token,
-              verified, spf_status, dkim_status, mx_status, return_path_status
+      `SELECT id, domain, dkim_identifier_string, dkim_public_key, verification_token,
+              verified, dns_checked_at, spf_status, spf_error, dkim_status, dkim_error,
+              mx_status, mx_error, return_path_status, return_path_error
        FROM customer_domains WHERE id = $1 AND organization_id = $2`,
       [req.params.id, req.user!.orgId!]
     );
@@ -336,178 +374,205 @@ router.get('/domains/:id/setup', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Domain not found' });
     }
     const d = domainResult.rows[0];
-    const spfHost = req.hostname;
+    if (!d.verified) {
+      return res.json({
+        redirect: `/portal/domains/${d.id}/verify`,
+        flash: { alert: `You can't set up DNS for this domain until it has been verified.` },
+      });
+    }
+    const identifierString = d.dkim_identifier_string || '';
     res.json({
-      domain: d.domain,
+      id: d.id,
+      name: d.domain,
       verified: d.verified,
+      dns_checked_at: d.dns_checked_at,
+      spf_record: spfRecord(),
+      dkim_record_name: dkimRecordName(identifierString),
+      dkim_record: dkimRecord(d.dkim_public_key || ''),
+      return_path_domain: returnPathDomain(d.domain),
+      return_path_target: config.dns.returnPathDomain,
+      mx_records: config.dns.mxRecords,
       checks: {
-        spf: d.spf_status, dkim: d.dkim_status,
-        mx: d.mx_status, return_path: d.return_path_status,
+        spf: { status: d.spf_status, error: d.spf_error },
+        dkim: { status: d.dkim_status, error: d.dkim_error },
+        mx: { status: d.mx_status, error: d.mx_error },
+        return_path: { status: d.return_path_status, error: d.return_path_error },
       },
-      dnsRecords: {
-        spf: `v=spf1 include:${spfHost} ~all`,
-        dkim: `${d.dkim_selector}._domainkey.${d.domain}  IN TXT  "v=DKIM1; k=rsa; p=${d.dkim_public_key}"`,
-        mx: `${d.domain}  IN MX  10 mail.${spfHost}`,
-      },
-      verificationToken: d.verification_token,
-      verificationPrefix: 'mailcouse-verification',
-      spfHost,
     });
   } catch (err) {
+    console.error('Domain setup error:', err);
     res.status(500).json({ error: 'Failed to get domain setup info' });
   }
 });
 
-router.post('/domains/:id/verify-email', async (req: Request, res: Response) => {
+router.get('/domains/:id/verify', async (req: Request, res: Response) => {
   try {
-    const domainResult = await query<{ id: string; domain: string; verification_token: string }>(
-      'SELECT id, domain, verification_token FROM customer_domains WHERE id = $1 AND organization_id = $2',
+    const domainResult = await query<{
+      id: string; domain: string; verification_method: string;
+      verification_token: string; verified: boolean;
+    }>(
+      'SELECT id, domain, verification_method, verification_token, verified FROM customer_domains WHERE id = $1 AND organization_id = $2',
       [req.params.id, req.user!.orgId!]
     );
     if (domainResult.rows.length === 0) {
       return res.status(404).json({ error: 'Domain not found' });
     }
-
-    const { domain, verification_token } = domainResult.rows[0];
-    const { code } = req.body;
-
-    if (code) {
-      if (code === verification_token.substring(0, 6)) {
-        await query(
-          `UPDATE customer_domains SET verified = true, verified_at = NOW()
-           WHERE id = $1`,
-          [req.params.id]
-        );
-        return res.json({ verified: true, message: 'Domain verified successfully' });
-      }
-      return res.json({ verified: false, message: 'Invalid verification code' });
+    const d = domainResult.rows[0];
+    if (d.verified) {
+      return res.json({ verified: true, redirect: '/portal/domains', flash: { alert: `${d.domain} has already been verified.` } });
     }
-
-    const aliases = ['webmaster', 'postmaster', 'admin', 'administrator', 'hostmaster'];
-    const verificationCode = verification_token.substring(0, 6);
-    const sentTo: string[] = [];
-
-    const mainDomain = domain;
-    const parentDomain = domain.split('.').slice(-2).join('.');
-
-    for (const alias of aliases) {
-      const emailTo = `${alias}@${mainDomain}`;
-      const emailToParent = `${alias}@${parentDomain}`;
-      sentTo.push(emailTo);
-      if (parentDomain !== mainDomain) {
-        sentTo.push(emailToParent);
-      }
-    }
-
     res.json({
-      verificationCode,
-      sentTo: [...new Set(sentTo)],
-      message: `Verification code sent to domain aliases. Add TXT record or use code ${verificationCode}.`,
+      id: d.id,
+      name: d.domain,
+      verification_method: d.verification_method || 'DNS',
+      dns_verification_string: dnsVerificationString(d.verification_token),
+      verification_email_addresses: verificationEmailAddresses(d.domain),
+      verification_token: d.verification_token,
+      email_address: (req.query as any).email_address || '',
+    });
+  } catch {
+    res.status(500).json({ error: 'Failed to get domain verification info' });
+  }
+});
+
+router.post('/domains/:id/verify', async (req: Request, res: Response) => {
+  try {
+    const domainResult = await query<{
+      id: string; domain: string; verification_method: string;
+      verification_token: string; verified: boolean;
+    }>(
+      'SELECT id, domain, verification_method, verification_token, verified FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (domainResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Domain not found' });
+    }
+    const d = domainResult.rows[0];
+    if (d.verified) {
+      return res.json({ verified: true, redirect: '/portal/domains', flash: { alert: `${d.domain} has already been verified.` } });
+    }
+
+    const method = d.verification_method || 'DNS';
+    const { code, email_address } = req.body;
+
+    if (method === 'DNS') {
+      const matches = await verifyWithDNS(d.domain, d.verification_token);
+      if (matches) {
+        await markVerified(d.id);
+        return res.json({
+          verified: true,
+          redirect: `/portal/domains/${d.id}/setup`,
+          flash: { notice: `${d.domain} has been verified successfully. You now need to configure your DNS records.` },
+        });
+      }
+      return res.json({
+        verified: false,
+        flash: { alert: `We couldn't verify your domain. Please double check you've added the TXT record correctly.` },
+      });
+    }
+
+    // Email verification
+    if (code) {
+      if (d.verification_token === String(code).trim()) {
+        await markVerified(d.id);
+        return res.json({
+          verified: true,
+          redirect: `/portal/domains/${d.id}/setup`,
+          flash: { notice: `${d.domain} has been verified successfully. You now need to configure your DNS records.` },
+        });
+      }
+      return res.json({ verified: false, flash: { alert: 'Invalid verification code. Please check and try again.' } });
+    }
+
+    if (email_address) {
+      const allowed = verificationEmailAddresses(d.domain);
+      if (!allowed.includes(email_address)) {
+        return res.status(400).json({ error: 'Invalid email address' });
+      }
+      const msgId = `<${crypto.randomUUID()}@${d.domain}>`;
+      const codeText = `Your verification code is: ${d.verification_token}\n\nPlease enter this code to verify your domain.`;
+      await query(
+        `INSERT INTO sent_messages (organization_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'outgoing')`,
+        [req.user!.orgId!, `noreply@${d.domain}`, email_address, 'Domain Verification',
+         codeText,
+         '', 100, 'sent', msgId]
+      );
+      deliverVerificationEmail(d.domain, email_address, codeText).catch(() => {});
+      return res.json({
+        email_address,
+        verification_code: d.verification_token,
+        redirect: `/portal/domains/${d.id}/verify?email_address=${encodeURIComponent(email_address)}`,
+      });
+    }
+
+    res.status(400).json({ error: 'Missing verification input' });
+  } catch (err) {
+    console.error('Verify domain error:', err);
+    res.status(500).json({ error: 'Failed to verify domain' });
+  }
+});
+
+router.post('/domains/:id/check', async (req: Request, res: Response) => {
+  try {
+    const domainResult = await query<{
+      id: string; domain: string; dkim_identifier_string: string; dkim_public_key: string;
+    }>(
+      'SELECT id, domain, dkim_identifier_string, dkim_public_key FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
+
+    const d = domainResult.rows[0];
+    const identifierString = d.dkim_identifier_string || '';
+    const { checks, ok } = await checkDomainDNS(d.domain, identifierString, dkimRecord(d.dkim_public_key || ''));
+
+    await query(
+      `UPDATE customer_domains SET spf_status = $1, spf_error = $2, dkim_status = $3, dkim_error = $4,
+              mx_status = $5, mx_error = $6, return_path_status = $7, return_path_error = $8, dns_checked_at = NOW()
+       WHERE id = $9`,
+      [
+        checks.spf.status, checks.spf.error,
+        checks.dkim.status, checks.dkim.error,
+        checks.mx.status, checks.mx.error,
+        checks.return_path.status, checks.return_path.error,
+        req.params.id,
+      ]
+    );
+
+    if (ok) {
+      return res.json({ dns_ok: true, redirect: '/portal/domains', flash: { notice: `Your DNS records for ${d.domain} look good!` } });
+    }
+    return res.json({
+      dns_ok: false,
+      redirect: `/portal/domains/${d.id}/setup`,
+      flash: { alert: 'There seems to be something wrong with your DNS records. Check below for information.' },
     });
   } catch (err) {
-    res.status(500).json({ error: 'Email verification failed' });
-  }
-});
-
-router.post('/domains/check', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.body;
-    const orgId = req.user!.orgId!;
-    const domainResult = await query(
-      'SELECT id, domain, dkim_selector FROM customer_domains WHERE id = $1 AND organization_id = $2',
-      [id, orgId]
-    );
-    if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
-
-    const { domain, dkim_selector } = domainResult.rows[0];
-    const dnsObj = require('dns').promises;
-    const statuses: Record<string, string> = {};
-
-    try {
-      const txt = await dnsObj.resolveTxt(domain);
-      statuses.spf = txt.flat().some((r: string) => r.startsWith('v=spf1')) ? 'ok' : 'missing';
-    } catch { statuses.spf = 'missing'; }
-
-    try {
-      if (dkim_selector) {
-        const dkimTxt = await dnsObj.resolveTxt(`${dkim_selector}._domainkey.${domain}`);
-        statuses.dkim = dkimTxt.length > 0 ? 'ok' : 'missing';
-      } else {
-        statuses.dkim = 'missing';
-      }
-    } catch { statuses.dkim = 'missing'; }
-
-    try {
-      const mx = await dnsObj.resolveMx(domain);
-      statuses.mx = mx.length > 0 ? 'ok' : 'missing';
-    } catch { statuses.mx = 'missing'; }
-
-    try {
-      const dmarc = await dnsObj.resolveTxt(`_dmarc.${domain}`);
-      statuses.return_path = dmarc.flat().some((r: string) => r.startsWith('v=DMARC1')) ? 'ok' : 'missing';
-    } catch { statuses.return_path = 'missing'; }
-
-    await query(
-      `UPDATE customer_domains SET spf_status = $1, dkim_status = $2, mx_status = $3, return_path_status = $4, dns_checked_at = NOW() WHERE id = $5`,
-      [statuses.spf, statuses.dkim, statuses.mx, statuses.return_path, id]
-    );
-
-    res.json({ checks: statuses });
-  } catch {
-    res.status(500).json({ error: 'DNS check failed' });
-  }
-});
-
-router.post('/domains/send-verification-email', async (req: Request, res: Response) => {
-  try {
-    const { id, email_address } = req.body;
-    const domainResult = await query(
-      'SELECT id, domain, verification_token FROM customer_domains WHERE id = $1 AND organization_id = $2',
-      [id, req.user!.orgId!]
-    );
-    if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
-    const { domain, verification_token } = domainResult.rows[0];
-    const code = verification_token.substring(0, 6);
-    const msgId = `<${crypto.randomUUID()}@${domain}>`;
-    await query(
-      `INSERT INTO sent_messages (organization_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'outgoing')`,
-      [req.user!.orgId!, `noreply@${domain}`, email_address, 'Domain Verification Code',
-       `Your verification code is: ${code}\n\nPlease enter this code to verify your domain.`,
-       '', 100, 'sent', msgId]
-    );
-    res.json({ sent: true, email: email_address, code });
-  } catch {
-    res.status(500).json({ error: 'Failed to send verification email' });
-  }
-});
-
-router.post('/domains/verify-email', async (req: Request, res: Response) => {
-  try {
-    const { id, code, email_address } = req.body;
-    const domainResult = await query(
-      'SELECT id, verification_token FROM customer_domains WHERE id = $1 AND organization_id = $2',
-      [id, req.user!.orgId!]
-    );
-    if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
-    const { verification_token } = domainResult.rows[0];
-    if (code === verification_token.substring(0, 6)) {
-      await query('UPDATE customer_domains SET verified = true, verified_at = NOW() WHERE id = $1', [id]);
-      return res.json({ verified: true });
-    }
-    res.json({ verified: false, message: 'Invalid verification code' });
-  } catch {
-    res.status(500).json({ error: 'Verification failed' });
+    console.error('Check DNS error:', err);
+    res.status(500).json({ error: 'Failed to check DNS' });
   }
 });
 
 router.post('/domains', async (req: Request, res: Response) => {
   try {
-    const { domain } = req.body;
+    let { domain, verification_method } = req.body;
     if (!domain) return res.status(400).json({ error: 'Domain name required' });
 
     const orgId = req.user!.orgId!;
-    const verificationToken = crypto.randomBytes(32).toString('hex');
+    domain = String(domain).toLowerCase().trim();
+    if (!/^[a-z0-9\-.]*$/.test(domain)) {
+      return res.status(422).json({ error: 'Domain name can only contain lowercase letters, numbers, dashes and dots' });
+    }
+
+    const existing = await query('SELECT id FROM customer_domains WHERE LOWER(domain) = $1 AND organization_id = $2', [domain, orgId]);
+    if (existing.rows.length > 0) {
+      return res.status(422).json({ error: 'Domain is already added' });
+    }
+
+    const method = VERIFICATION_METHODS.includes(verification_method) ? verification_method : 'DNS';
+    const verificationToken = generateVerificationToken(method);
+    const dkimIdentifierString = generateDKIMIdentifierString();
 
     const key = generateKeyPair();
     const pubKeyBase64 = extractPublicKeyBase64(key.publicKey);
@@ -515,96 +580,17 @@ router.post('/domains', async (req: Request, res: Response) => {
 
     const result = await query<{ id: string }>(
       `INSERT INTO customer_domains
-       (organization_id, domain, verification_token, dkim_selector, dkim_private_key, dkim_public_key, outgoing)
-       VALUES ($1, $2, $3, $4, $5, $6, true)
+       (organization_id, domain, verification_token, verification_method, dkim_identifier_string,
+        dkim_selector, dkim_private_key, dkim_public_key, outgoing)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
        RETURNING id`,
-      [orgId, domain.toLowerCase(), verificationToken, key.selector, encryptedPrivKey, pubKeyBase64]
+      [orgId, domain, verificationToken, method, dkimIdentifierString, dkimIdentifier(dkimIdentifierString), encryptedPrivKey, pubKeyBase64]
     );
 
-    res.status(201).json({
-      id: result.rows[0].id,
-      domain: domain.toLowerCase(),
-      verificationToken,
-      dkimSelector: key.selector,
-      dkimPublicKey: pubKeyBase64,
-      dnsRecords: {
-        spf: `v=spf1 include:${req.hostname} ~all`,
-        dkim: `${key.selector}._domainkey.${domain.toLowerCase()}  IN TXT  "v=DKIM1; k=rsa; p=${pubKeyBase64}"`,
-        mx: `${domain.toLowerCase()}  IN MX  10 live.noblecircle.online`,
-      },
-    });
+    res.status(201).json({ id: result.rows[0].id, verified: false, verification_method: method });
   } catch (err: any) {
-    if (err?.constraint === 'customer_domains_domain_key') {
-      return res.status(409).json({ error: 'Domain already added' });
-    }
     console.error('Add domain error:', err);
     res.status(500).json({ error: 'Failed to add domain' });
-  }
-});
-
-router.get('/domains/:id/verify', async (req: Request, res: Response) => {
-  try {
-    const domainResult = await query<{ id: string; domain: string }>(
-      'SELECT id, domain FROM customer_domains WHERE id = $1 AND organization_id = $2',
-      [req.params.id, req.user!.orgId!]
-    );
-    if (domainResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Domain not found' });
-    }
-
-    const { domain } = domainResult.rows[0];
-    const dns = require('dns').promises;
-    const statuses: Record<string, string> = { spf: 'missing', dkim: 'missing', mx: 'missing', return_path: 'missing' };
-
-    try {
-      const txtRecords = await dns.resolveTxt(domain);
-      const spfRecord = txtRecords.flat().find((r: string) => r.startsWith('v=spf1'));
-      statuses.spf = spfRecord ? 'ok' : 'missing';
-    } catch { statuses.spf = 'missing'; }
-
-    try {
-      const dmarcRecords = await dns.resolveTxt(`_dmarc.${domain}`);
-      const dmarc = dmarcRecords.flat().find((r: string) => r.startsWith('v=DMARC1'));
-      statuses.return_path = dmarc ? 'ok' : 'missing';
-    } catch { statuses.return_path = 'missing'; }
-
-    try {
-      const mxRecords = await dns.resolveMx(domain);
-      statuses.mx = mxRecords.some((r: any) => r.exchange === 'live.noblecircle.online') ? 'ok' : 'missing';
-    } catch { statuses.mx = 'missing'; }
-
-    try {
-      const dkimRow = await query<{ dkim_selector: string }>(
-        'SELECT dkim_selector FROM customer_domains WHERE id = $1',
-        [req.params.id]
-      );
-      if (dkimRow.rows[0]?.dkim_selector) {
-        const dkimRecords = await dns.resolveTxt(`${dkimRow.rows[0].dkim_selector}._domainkey.${domain}`);
-        statuses.dkim = dkimRecords.length > 0 ? 'ok' : 'missing';
-      }
-    } catch { statuses.dkim = 'missing'; }
-
-    const allOk = Object.values(statuses).every((s) => s === 'ok');
-    if (allOk) {
-      await query(
-        'UPDATE customer_domains SET verified = true, verified_at = NOW(), spf_status = $1, dkim_status = $2, mx_status = $3, return_path_status = $4 WHERE id = $5',
-        [statuses.spf, statuses.dkim, statuses.mx, statuses.return_path, req.params.id]
-      );
-    } else {
-      await query(
-        'UPDATE customer_domains SET spf_status = $1, dkim_status = $2, mx_status = $3, return_path_status = $4 WHERE id = $5',
-        [statuses.spf, statuses.dkim, statuses.mx, statuses.return_path, req.params.id]
-      );
-    }
-
-      await query(
-        'UPDATE customer_domains SET dns_checked_at = NOW() WHERE id = $1',
-        [req.params.id]
-      );
-      res.json({ domain, verified: allOk, checks: statuses });
-  } catch (err) {
-    console.error('Verify domain error:', err);
-    res.status(500).json({ error: 'Failed to verify domain' });
   }
 });
 
@@ -619,6 +605,46 @@ router.delete('/domains/:id', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to delete domain' });
   }
 });
+
+async function verifyWithDNS(name: string, verificationToken: string): Promise<boolean> {
+  const { promises } = require('dns');
+  try {
+    const records = await promises.resolveTxt(name);
+    const strings = records.map((r: string[]) => r.join(''));
+    return strings.includes(dnsVerificationString(verificationToken));
+  } catch {
+    return false;
+  }
+}
+
+async function markVerified(id: string): Promise<void> {
+  await query('UPDATE customer_domains SET verified = true, verified_at = NOW() WHERE id = $1', [id]);
+}
+
+async function deliverVerificationEmail(domain: string, to: string, body: string): Promise<void> {
+  try {
+    const nodemailer = await import('nodemailer');
+    const mxRecords = await dns.promises.resolveMx(to.split('@')[1]);
+    if (!mxRecords || mxRecords.length === 0) return;
+    mxRecords.sort((a, b) => a.priority - b.priority);
+    const transporter = nodemailer.createTransport({
+      host: mxRecords[0].exchange,
+      port: 25,
+      secure: false,
+      tls: { rejectUnauthorized: false },
+    });
+    await transporter.sendMail({
+      from: `postmaster@${domain}`,
+      envelope: { from: `postmaster@${domain}`, to: [to] },
+      to,
+      subject: 'Domain Verification',
+      text: body,
+    });
+    transporter.close();
+  } catch {
+    // Delivery failures are tolerated; the record still exists in sent_messages.
+  }
+}
 
 // ─── SMTP Credentials ────────────────────────────────────
 
@@ -641,19 +667,19 @@ router.get('/credentials', async (req: Request, res: Response) => {
 
 router.post('/credentials', async (req: Request, res: Response) => {
   try {
-    const { name, domainId, type } = req.body;
+    const { name, domainId, type, hold } = req.body;
     if (!name) return res.status(400).json({ error: 'Credential name required' });
 
     const username = `u_${crypto.randomBytes(12).toString('hex')}`;
     const password = crypto.randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
     const hash = await require('bcryptjs').hash(password, 10);
-    const credType = (type || 'SMTP').toLowerCase();
+    const credType = (type || 'smtp-username').toLowerCase();
 
     const result = await query<{ id: string }>(
-      `INSERT INTO smtp_credentials (organization_id, customer_domain_id, name, username, password_hash, type)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO smtp_credentials (organization_id, customer_domain_id, name, username, password_hash, type, hold)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
-      [req.user!.orgId!, domainId || null, name, username, hash, credType]
+      [req.user!.orgId!, domainId || null, name, username, hash, credType, hold === 'true' || hold === true]
     );
 
     res.status(201).json({
@@ -666,6 +692,33 @@ router.post('/credentials', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Create credential error:', err);
     res.status(500).json({ error: 'Failed to create credential' });
+  }
+});
+
+router.put('/credentials/:id', async (req: Request, res: Response) => {
+  try {
+    const { name, hold } = req.body;
+    if (!name) return res.status(400).json({ error: 'Credential name required' });
+    await query(
+      'UPDATE smtp_credentials SET name = $1, hold = $2 WHERE id = $3 AND organization_id = $4',
+      [name, hold === 'true' || hold === true, req.params.id, req.user!.orgId!]
+    );
+    res.json({ message: 'Credential saved' });
+  } catch {
+    res.status(500).json({ error: 'Failed to save credential' });
+  }
+});
+
+router.get('/credentials/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT id, name, username, type, hold FROM smtp_credentials WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Credential not found' });
+    res.json(result.rows[0]);
+  } catch {
+    res.status(500).json({ error: 'Failed to load credential' });
   }
 });
 
@@ -880,19 +933,21 @@ router.get('/webhooks/history/:uuid', async (req: Request, res: Response) => {
 
 router.post('/settings/advanced', async (req: Request, res: Response) => {
   try {
-    const { send_limit, allow_sender, privacy_mode, message_retention_days, raw_message_retention_days, raw_message_retention_size } = req.body;
+    const { send_limit, allow_sender, privacy_mode, log_smtp_data, outbound_spam_threshold, message_retention_days, raw_message_retention_days, raw_message_retention_size } = req.body;
     await query(
       `UPDATE servers SET
-       send_limit = $1, allow_sender = $2, privacy_mode = $3,
-       message_retention_days = $4, raw_message_retention_days = $5, raw_message_retention_size = $6
-       WHERE organization_id = $7`,
+       send_limit = $1, allow_sender = $2, privacy_mode = $3, log_smtp_data = $4, outbound_spam_threshold = $5,
+       message_retention_days = $6, raw_message_retention_days = $7, raw_message_retention_size = $8
+       WHERE organization_id = $9`,
       [
-        send_limit ? parseInt(send_limit) : null,
+        send_limit !== undefined && send_limit !== '' ? parseInt(send_limit) : null,
         allow_sender === 'true',
         privacy_mode === 'true',
-        message_retention_days ? parseInt(message_retention_days) : null,
-        raw_message_retention_days ? parseInt(raw_message_retention_days) : null,
-        raw_message_retention_size ? parseInt(raw_message_retention_size) : null,
+        log_smtp_data === 'true',
+        outbound_spam_threshold !== undefined && outbound_spam_threshold !== '' ? parseFloat(outbound_spam_threshold) : null,
+        message_retention_days !== undefined && message_retention_days !== '' ? parseInt(message_retention_days) : null,
+        raw_message_retention_days !== undefined && raw_message_retention_days !== '' ? parseInt(raw_message_retention_days) : null,
+        raw_message_retention_size !== undefined && raw_message_retention_size !== '' ? parseInt(raw_message_retention_size) : null,
         req.user!.orgId!,
       ]
     );
@@ -924,6 +979,50 @@ router.post('/settings/unsuspend', async (req: Request, res: Response) => {
     res.json({ message: 'Server unsuspended' });
   } catch {
     res.status(500).json({ error: 'Failed to unsuspend server' });
+  }
+});
+
+// ─── Delete Server (Postal servers#destroy) ────────────────
+
+router.post('/settings/delete', async (req: Request, res: Response) => {
+  try {
+    const { confirm_text } = req.body;
+    const serverResult = await query(
+      'SELECT name FROM servers WHERE organization_id = $1',
+      [req.user!.orgId!]
+    );
+    const server = serverResult.rows[0];
+    if (server && String(confirm_text || '').trim().toLowerCase() !== String(server.name).trim().toLowerCase()) {
+      return res.json({
+        alert: 'The text you entered does not match the server name. Please check and try again.',
+      });
+    }
+    await query('DELETE FROM servers WHERE organization_id = $1', [req.user!.orgId!]);
+    res.json({
+      redirect: '/portal/dashboard',
+      notice: server ? `${server.name} has been deleted successfully` : 'Server has been deleted successfully',
+    });
+  } catch {
+    res.status(500).json({ error: 'Failed to delete server' });
+  }
+});
+
+// ─── Spam Thresholds (Postal servers#update) ───────────────
+
+router.post('/settings/spam', async (req: Request, res: Response) => {
+  try {
+    const { spam_threshold, spam_failure_threshold } = req.body;
+    await query(
+      `UPDATE servers SET spam_threshold = $1, spam_failure_threshold = $2 WHERE organization_id = $3`,
+      [
+        spam_threshold !== undefined ? parseFloat(spam_threshold) : 5,
+        spam_failure_threshold !== undefined ? parseFloat(spam_failure_threshold) : 20,
+        req.user!.orgId!,
+      ]
+    );
+    res.json({ message: 'Spam thresholds saved' });
+  } catch {
+    res.status(500).json({ error: 'Failed to save spam thresholds' });
   }
 });
 
@@ -988,10 +1087,35 @@ router.get('/servers', async (_req: Request, res: Response) => {
 router.get('/routes', async (req: Request, res: Response) => {
   try {
     const result = await query(
-      'SELECT * FROM routes WHERE organization_id = $1 ORDER BY priority ASC',
+      `SELECT r.*, cd.domain as route_domain
+       FROM routes r
+       LEFT JOIN customer_domains cd ON cd.domain = r.domain AND cd.organization_id = r.organization_id
+       WHERE r.organization_id = $1 ORDER BY r.priority ASC`,
       [req.user!.orgId!]
     );
-    res.json({ routes: result.rows });
+    const routes = result.rows.map((r: any) => {
+      const endpointType = r.action_type === 'http' ? 'HTTP' : r.action_type === 'smtp' ? 'SMTP' : r.action_type === 'address' ? 'Address' : null;
+      return {
+        id: r.id,
+        description: r.name || 'Unnamed Route',
+        domain: r.domain,
+        mode: r.mode || 'Endpoint',
+        endpoint_type: endpointType,
+        endpoint: r.action_value || '',
+        spam_mode: r.spam_mode || 'Mark',
+        action_type: r.action_type,
+        action_value: r.action_value,
+      };
+    });
+    res.json({
+      routes,
+      endpoint_counts: {
+        http: routes.filter((r: any) => r.endpoint_type === 'HTTP').length,
+        smtp: routes.filter((r: any) => r.endpoint_type === 'SMTP').length,
+        address: routes.filter((r: any) => r.endpoint_type === 'Address').length,
+        total: routes.length,
+      },
+    });
   } catch {
     res.status(500).json({ error: 'Failed to list routes' });
   }
@@ -999,16 +1123,16 @@ router.get('/routes', async (req: Request, res: Response) => {
 
 router.post('/routes', async (req: Request, res: Response) => {
   try {
-    const { name, endpoint_type, http_url, smtp_host, smtp_port, address } = req.body;
+    const { name, domain, endpoint_type, http_url, smtp_host, smtp_port, address, spam_mode } = req.body;
     let actionValue = '';
     let actionType = 'webhook';
     if (endpoint_type === 'HTTP' && http_url) { actionType = 'http'; actionValue = http_url; }
     else if (endpoint_type === 'SMTP' && smtp_host) { actionType = 'smtp'; actionValue = `${smtp_host}:${smtp_port || 587}`; }
     else if (endpoint_type === 'Address' && address) { actionType = 'address'; actionValue = address; }
     const result = await query<{ id: string }>(
-      `INSERT INTO routes (organization_id, name, domain, match_type, match_value, action_type, action_value, priority)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [req.user!.orgId!, name || 'Unnamed Route', null, 'catch_all', '', actionType, actionValue, 10]
+      `INSERT INTO routes (organization_id, name, domain, match_type, match_value, action_type, action_value, spam_mode, mode, priority)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Endpoint', 10) RETURNING id`,
+      [req.user!.orgId!, name || 'Unnamed Route', domain || null, 'catch_all', '', actionType, actionValue, spam_mode || 'Mark']
     );
     res.status(201).json({ id: result.rows[0].id });
   } catch {
@@ -1022,6 +1146,24 @@ router.delete('/routes/:id', async (req: Request, res: Response) => {
     res.json({ message: 'Route removed' });
   } catch {
     res.status(500).json({ error: 'Failed to delete route' });
+  }
+});
+
+router.put('/routes/:id', async (req: Request, res: Response) => {
+  try {
+    const { name, domain, endpoint_type, http_url, smtp_host, smtp_port, address, spam_mode } = req.body;
+    let actionValue = '';
+    let actionType = 'webhook';
+    if (endpoint_type === 'HTTP' && http_url) { actionType = 'http'; actionValue = http_url; }
+    else if (endpoint_type === 'SMTP' && smtp_host) { actionType = 'smtp'; actionValue = `${smtp_host}:${smtp_port || 587}`; }
+    else if (endpoint_type === 'Address' && address) { actionType = 'address'; actionValue = address; }
+    await query(
+      `UPDATE routes SET name = $1, domain = $2, action_type = $3, action_value = $4, spam_mode = $5 WHERE id = $6 AND organization_id = $7`,
+      [name || 'Unnamed Route', domain || null, actionType, actionValue, spam_mode || 'Mark', req.params.id, req.user!.orgId!]
+    );
+    res.json({ message: 'Route updated' });
+  } catch {
+    res.status(500).json({ error: 'Failed to update route' });
   }
 });
 
@@ -1041,16 +1183,42 @@ router.get('/webhooks', async (req: Request, res: Response) => {
 
 router.post('/webhooks', async (req: Request, res: Response) => {
   try {
-    const { url, http_method, events } = req.body;
-    if (!url) return res.status(400).json({ error: 'URL required' });
+    const { name, endpoint_url, events, enabled } = req.body;
+    if (!endpoint_url) return res.status(400).json({ error: 'URL required' });
     const result = await query<{ id: string }>(
-      `INSERT INTO webhooks (organization_id, name, url, http_method, events, enabled)
-       VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
-      [req.user!.orgId!, url, url, http_method || 'POST', events || ['Send', 'Open', 'Click', 'Bounce', 'Complaint']]
+      `INSERT INTO webhooks (organization_id, name, endpoint_url, events, enabled)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [req.user!.orgId!, name || endpoint_url, endpoint_url, events || [], enabled === false ? false : true]
     );
     res.status(201).json({ id: result.rows[0].id });
   } catch {
     res.status(500).json({ error: 'Failed to create webhook' });
+  }
+});
+
+router.get('/webhooks/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT id, name, endpoint_url, events, enabled, last_delivered_at FROM webhooks WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Webhook not found' });
+    res.json(result.rows[0]);
+  } catch {
+    res.status(500).json({ error: 'Failed to load webhook' });
+  }
+});
+
+router.put('/webhooks/:id', async (req: Request, res: Response) => {
+  try {
+    const { name, endpoint_url, events, enabled } = req.body;
+    await query(
+      `UPDATE webhooks SET name = $1, endpoint_url = $2, events = $3, enabled = $4 WHERE id = $5 AND organization_id = $6`,
+      [name, endpoint_url, events || [], enabled === false ? false : true, req.params.id, req.user!.orgId!]
+    );
+    res.json({ message: 'Webhook saved' });
+  } catch {
+    res.status(500).json({ error: 'Failed to save webhook' });
   }
 });
 
@@ -1093,15 +1261,41 @@ router.get('/track-domains', async (req: Request, res: Response) => {
 
 router.post('/track-domains', async (req: Request, res: Response) => {
   try {
-    const { domain, ssl_enabled } = req.body;
+    const { domain, ssl_enabled, track_loads, track_clicks, excluded_click_domains } = req.body;
     if (!domain) return res.status(400).json({ error: 'Domain required' });
     const result = await query<{ id: string }>(
-      'INSERT INTO track_domains (organization_id, domain, ssl_enabled) VALUES ($1, $2, $3) RETURNING id',
-      [req.user!.orgId!, domain.toLowerCase(), ssl_enabled !== false]
+      'INSERT INTO track_domains (organization_id, domain, ssl_enabled, track_loads, track_clicks, excluded_click_domains) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [req.user!.orgId!, domain.toLowerCase(), ssl_enabled !== false, track_loads !== false, track_clicks !== false, excluded_click_domains || '']
     );
     res.status(201).json({ id: result.rows[0].id, domain: domain.toLowerCase(), ssl_enabled: ssl_enabled !== false });
   } catch {
     res.status(500).json({ error: 'Failed to add track domain' });
+  }
+});
+
+router.get('/track-domains/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT id, domain, ssl_enabled, track_loads, track_clicks, excluded_click_domains, dns_status, dns_error FROM track_domains WHERE id = $1 AND organization_id = $2',
+      [req.params.id, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Track domain not found' });
+    res.json(result.rows[0]);
+  } catch {
+    res.status(500).json({ error: 'Failed to load track domain' });
+  }
+});
+
+router.put('/track-domains/:id', async (req: Request, res: Response) => {
+  try {
+    const { ssl_enabled, track_loads, track_clicks, excluded_click_domains } = req.body;
+    await query(
+      'UPDATE track_domains SET ssl_enabled = $1, track_loads = $2, track_clicks = $3, excluded_click_domains = $4 WHERE id = $5 AND organization_id = $6',
+      [ssl_enabled !== false, track_loads !== false, track_clicks !== false, excluded_click_domains || '', req.params.id, req.user!.orgId!]
+    );
+    res.json({ message: 'Track domain saved' });
+  } catch {
+    res.status(500).json({ error: 'Failed to save track domain' });
   }
 });
 
@@ -1170,7 +1364,11 @@ router.get('/suppressions', async (req: Request, res: Response) => {
     const result = await query(
       'SELECT * FROM suppression_list ORDER BY suppressed_at DESC LIMIT 100'
     );
-    res.json({ suppressions: result.rows });
+    const rows = result.rows.map((r: any) => ({
+      ...r,
+      keep_until: new Date(new Date(r.suppressed_at).getTime() + 30 * 24 * 3600 * 1000),
+    }));
+    res.json({ suppressions: rows });
   } catch {
     res.status(500).json({ error: 'Failed to list suppressions' });
   }

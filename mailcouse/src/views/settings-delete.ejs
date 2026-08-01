@@ -1,0 +1,71 @@
+<%- include('partials/server-header', { activeNav: 'settings', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link is-active">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
+<nav class="navBar navBar--secondary">
+  <ul>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Server Settings</a></li>
+    <li class="navBar__item"><a href="/portal/settings/spam" class="navBar__link">Spam</a></li>
+    <li class="navBar__item"><a href="/portal/settings/retention" class="navBar__link">Retention</a></li>
+    <li class="navBar__item"><a href="/portal/settings/limits" class="navBar__link">Send Limit</a></li>
+    <li class="navBar__item"><a href="/portal/settings/advanced" class="navBar__link">Advanced Settings</a></li>
+    <li class="navBar__item"><a href="/portal/settings/delete" class="navBar__link is-active">Delete</a></li>
+  </ul>
+</nav>
+<div class="pageContent pageContent--compact">
+  <h2 class="pageContent__intro u-margin">
+    If you no longer need this server you can remove it. When you remove a server all
+    retained messages will be deleted and all mail which is received will be rejected
+    immediately.
+  </h2>
+  <div class="dangerZone">
+    <p class="pageContent__text u-margin">
+      To continue to remove this server, please enter the server name in the field below and press
+      continue. <b class="u-red">There will be no other confirmations.</b>
+    </p>
+    <form id="delete-server-form" action="/api/portal/settings/delete" method="POST" remote="true">
+      <p class="u-margin">
+        <input type="text" id="confirm-text" class="input input--text input--danger">
+      </p>
+      <div class="buttonSet u-center">
+        <input type="submit" value="Delete this mail server and all messages" class="button button--danger js-form-submit">
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+(function() {
+  var token = 'Bearer <%= token %>';
+  var form = document.getElementById('delete-server-form');
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var btn = form.querySelector('.js-form-submit');
+    btn.disabled = true;
+    fetch(form.action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
+      body: JSON.stringify({ confirm_text: document.getElementById('confirm-text').value })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.redirect) {
+        window.location.href = data.redirect + (data.notice ? '?notice=' + encodeURIComponent(data.notice) : '');
+      } else {
+        var el = document.createElement('div');
+        el.className = 'flashMessage';
+        el.textContent = data.alert || 'Something went wrong';
+        el.onclick = function() { this.remove(); };
+        document.body.insertBefore(el, document.body.firstChild);
+        btn.disabled = false;
+      }
+    }).catch(function() { btn.disabled = false; });
+  });
+})();
+</script>

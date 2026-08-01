@@ -134,6 +134,13 @@ const server = new SMTPServer({
 
 export function startBounceHandler(port: number = 2525): void {
   fs.mkdirSync(WARMUP_STORE, { recursive: true });
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+      console.error(`Bounce handler error on port ${port}: ${err.code}`);
+      return;
+    }
+    console.error('Bounce handler error:', err);
+  });
   server.listen(port, '0.0.0.0', () => {
     console.log(`Bounce handler listening on port ${port}`);
   });

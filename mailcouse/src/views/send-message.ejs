@@ -1,10 +1,28 @@
-<div class="pageHeader">
-  <div class="pageHeader__title">Send Message</div>
+<% var dir = direction === 'incoming' ? 'incoming' : 'outgoing'; %>
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
+  </div>
 </div>
-
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
 <nav class="navBar navBar--secondary">
   <ul>
-    <li class="navBar__item"><a href="/portal/messages/outgoing" class="navBar__link">Outgoing Messages</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Outgoing Messages</a></li>
     <li class="navBar__item"><a href="/portal/messages/incoming" class="navBar__link">Incoming Messages</a></li>
     <li class="navBar__item"><a href="/portal/messages/queue" class="navBar__link">Queue</a></li>
     <li class="navBar__item"><a href="/portal/messages/held" class="navBar__link">Held</a></li>
@@ -12,113 +30,75 @@
     <li class="navBar__item"><a href="/portal/messages/suppressions" class="navBar__link">Suppressions</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
-  <p class="pageContent__intro u-margin">
-    You can use this form to send a message through this mail server. This is useful
-    for testing and debugging purposes.
-  </p>
-
-  <% if (direction !== 'incoming') { %>
-    <p class="pageContent__text u-margin newMessageType newMessageType--outgoing">
-      <b>You are sending an outgoing message.</b> This e-mail will be routed as if it was an e-mail sent from your mail server.
-      <a href="/portal/send?direction=incoming" class="u-link">Simulate an incoming e-mail instead?</a>
-    </p>
+  <p class="pageContent__intro u-margin">You can use this form to send a message through this mail server. This is useful for testing and debugging purposes.</p>
+  <% if (dir === 'outgoing') { %>
+    <p class="pageContent__text u-margin newMessageType newMessageType--outgoing"><b>You are sending an outgoing message.</b> This e-mail will be routed as if it was an e-mail sent from your mail server. <a href="/portal/send?direction=incoming" class="u-link">Simulate an incoming e-mail instead?</a></p>
   <% } else { %>
-    <p class="pageContent__text u-margin newMessageType newMessageType--incoming">
-      <b>You are sending an incoming message.</b> This e-mail can only be sent to your routes and will behave as if it was received by your mail server.
-      <a href="/portal/send" class="u-link">Simulate an outgoing e-mail instead?</a>
-    </p>
+    <p class="pageContent__text u-margin newMessageType newMessageType--incoming"><b>You are sending an incoming message.</b> This e-mail will can only be sent to your routes and will behave as if it was received by your mail server. <a href="/portal/send" class="u-link">Simulate an outgoing e-mail instead?</a></p>
   <% } %>
-
-  <form action="/api/portal/send" method="POST" id="send-message-form" onsubmit="return sendMessage(event)">
-    <input type="hidden" name="direction" value="<%= direction || 'outgoing' %>">
-
-    <fieldset class="fieldSet">
-      <% if (direction !== 'incoming') { %>
+  <form id="send-form">
+    <input type="hidden" id="direction" value="<%= dir %>">
+    <div class="fieldSet">
+      <% if (dir === 'outgoing') { %>
         <div class="fieldSet__field">
-          <label class="fieldSet__label" for="message_from">From</label>
+          <label class="fieldSet__label" for="message_from">From </label>
           <div class="fieldSet__input">
-            <input type="text" name="message[from]" id="message_from" class="input input--text" value="<%= message.from || '' %>" autofocus>
-            <p class="fieldSet__text">
-              Enter the address that you wish to send the message from. This must be
-              an address which exists at one of your verified domains.
-            </p>
+            <input type="text" id="message_from" class="input input--text" autofocus value="<%= message.from %>">
+            <p class="fieldSet__text">Enter the address that you wish to wish to send the message from. This must be an address which exists at one of your verified domains.</p>
           </div>
         </div>
         <div class="fieldSet__field">
           <label class="fieldSet__label" for="message_to">To</label>
-          <div class="fieldSet__input">
-            <input type="text" name="message[to]" id="message_to" class="input input--text" value="<%= message.to || '' %>">
-          </div>
+          <div class="fieldSet__input"><input type="text" id="message_to" class="input input--text" value="<%= message.to %>"></div>
         </div>
       <% } else { %>
         <div class="fieldSet__field">
-          <label class="fieldSet__label" for="message_route">Route</label>
-          <div class="fieldSet__input">
-            <select name="message[route_id]" id="message_route" class="input input--text">
-              <option value="">Select a route...</option>
-              <% (routes || []).forEach(function(r) { %>
-                <option value="<%= r.id %>"><%= r.name || r.match_type %>: <%= r.action_value %></option>
-              <% }) %>
-            </select>
-          </div>
+          <label class="fieldSet__label" for="message_to">Route</label>
+          <div class="fieldSet__input"><input type="text" id="message_to" class="input input--text" value="<%= message.to %>"></div>
         </div>
         <div class="fieldSet__field">
           <label class="fieldSet__label" for="message_from">From</label>
-          <div class="fieldSet__input">
-            <input type="text" name="message[from]" id="message_from" class="input input--text" value="<%= message.from || '' %>">
-          </div>
+          <div class="fieldSet__input"><input type="text" id="message_from" class="input input--text" value="<%= message.from %>"></div>
         </div>
       <% } %>
-
       <div class="fieldSet__field">
         <label class="fieldSet__label" for="message_subject">Subject</label>
-        <div class="fieldSet__input">
-          <input type="text" name="message[subject]" id="message_subject" class="input input--text" value="<%= message.subject || '' %>">
-        </div>
+        <div class="fieldSet__input"><input type="text" id="message_subject" class="input input--text" value="<%= message.subject %>"></div>
       </div>
       <div class="fieldSet__field">
         <label class="fieldSet__label" for="message_plain_body">Body</label>
-        <div class="fieldSet__input">
-          <textarea name="message[plain_body]" id="message_plain_body" class="input input--area"><%= message.plain_body || '' %></textarea>
-        </div>
+        <div class="fieldSet__input"><textarea id="message_plain_body" class="input input--area"><%= message.plain_body %></textarea></div>
       </div>
-    </fieldset>
-    <p class="fieldSetSubmit buttonSet">
-      <input type="submit" value="Send Message" class="button button--positive js-form-submit">
-    </p>
+    </div>
+    <div class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit">Send Message</button>
+    </div>
   </form>
 </div>
-
 <script>
-async function sendMessage(event) {
-  event.preventDefault();
-  var form = event.target;
-  var btn = form.querySelector('.js-form-submit');
-  btn.disabled = true;
-  btn.value = 'Sending...';
+document.getElementById('send-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  var btn = this.querySelector('.js-form-submit');
+  btn.textContent = 'Sending...'; btn.disabled = true;
   try {
-    var fd = new FormData(form);
-    var data = {};
-    for (var pair of fd.entries()) data[pair[0]] = pair[1];
-    var res = await fetch('/api/portal/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+    var r = await fetch('/api/portal/send', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer <%= token %>'},
+      body:JSON.stringify({
+        direction: document.getElementById('direction').value,
+        message: {
+          from: document.getElementById('message_from').value,
+          to: document.getElementById('message_to').value,
+          subject: document.getElementById('message_subject').value,
+          plain_body: document.getElementById('message_plain_body').value
+        }
+      })
     });
-    var json = await res.json();
-    if (res.ok && json.id) {
-      window.location.href = '/portal/messages/' + json.id;
-    } else {
-      alert(json.error || 'Failed to send message');
-      btn.disabled = false;
-      btn.value = 'Send Message';
-    }
-  } catch(e) {
-    alert('Failed to send message: ' + e.message);
-    btn.disabled = false;
-    btn.value = 'Send Message';
-  }
-}
+    var d = await r.json();
+    if (d.id) { location.href = '/portal/messages/' + d.id; }
+    else { alert(d.error || 'Failed to send'); }
+  } catch(err) { alert('Error: ' + err.message); }
+  btn.textContent = 'Send Message'; btn.disabled = false;
+});
 </script>

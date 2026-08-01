@@ -114,6 +114,20 @@ export const config = {
     },
   },
 
+  // DNS settings (Postal Config.dns equivalent)
+  dns: {
+    mxRecords: (process.env.DNS_MX_RECORDS || 'mx1.postal.example.com,mx2.postal.example.com').split(','),
+    spfInclude: process.env.DNS_SPF_INCLUDE || 'spf.postal.example.com',
+    returnPathDomain: process.env.DNS_RETURN_PATH_DOMAIN || 'rp.postal.example.com',
+    routeDomain: process.env.DNS_ROUTE_DOMAIN || 'routes.postal.example.com',
+    trackDomain: process.env.DNS_TRACK_DOMAIN || 'track.postal.example.com',
+    heloHostname: process.env.DNS_HELO_HOSTNAME || '',
+    dkimIdentifier: process.env.DNS_DKIM_IDENTIFIER || 'postal',
+    domainVerifyPrefix: process.env.DNS_DOMAIN_VERIFY_PREFIX || 'postal-verification',
+    customReturnPathPrefix: process.env.DNS_CUSTOM_RETURN_PATH_PREFIX || 'psrp',
+    dnsTimeout: parseInt(process.env.DNS_TIMEOUT || '5'),
+  },
+
   // Validation
   validation: {
     roleBasedPrefixes: [

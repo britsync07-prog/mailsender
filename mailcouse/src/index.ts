@@ -71,6 +71,47 @@ app.use((req, res, next) => {
   next();
 });
 
+function getFlash(req: express.Request): { type: string; message: string } | null {
+  const notice = req.query.notice as string | undefined;
+  const alert = req.query.alert as string | undefined;
+  if (notice) return { type: 'notice', message: notice };
+  if (alert) return { type: 'alert', message: alert };
+  return null;
+}
+
+async function fetchServerHeader(token: string): Promise<Record<string, unknown>> {
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const res = await fetch(`${base}/api/portal/dashboard`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!res.ok) return {};
+    const data = await res.json();
+    const stats = data.stats || {};
+    const sent = parseInt(stats.messagesSent || 0);
+    const bounces = parseInt(stats.bounces || 0);
+    const limit = stats.sendLimit ? parseInt(stats.sendLimit) : null;
+    const todaySent = parseInt(stats.todaySent || 0);
+    const ds = data.domain_stats || {};
+    return {
+      serverMode: data.server?.mode || 'live',
+      serverName: 'Mail Server',
+      totalDomains: ds.total ?? parseInt(stats.domains || 0),
+      unverifiedDomains: ds.unverified ?? 0,
+      badDnsDomains: ds.bad_dns ?? 0,
+      heldMessages: parseInt(stats.held || 0),
+      queuedMessages: parseInt(stats.queued || 0),
+      bounceRate: sent > 0 ? (bounces / sent * 100).toFixed(1) : '0.0',
+      diskUsed: '0 MB',
+      outgoingPct: limit && limit > 0 ? Math.min(100, Math.round(todaySent / limit * 100)) : 0,
+      outgoingMessages: todaySent,
+      incomingMessages: 0,
+      messageRate: (parseInt(stats.dailyAverage || 0) / 1440).toFixed(2),
+      sendLimit: limit,
+    };
+  } catch {
+    return {};
+  }
+}
+
 const apiLimiter = rateLimit({
   windowMs: 60000,
   max: 100,
@@ -192,6 +233,52 @@ app.get('/signup', (_req, res) => {
   res.render('login', { layout: 'sub', title: 'Create Account', mode: 'signup', error: null });
 });
 
+app.get('/login/reset', (_req, res) => {
+  res.render('password-reset', { layout: 'sub', title: 'Reset your password', flash: null });
+});
+
+app.post('/login/reset', async (req, res) => {
+  try {
+    const apiRes = await fetch(`http://localhost:${config.api.port}/api/auth/password-reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email_address: req.body.email_address }),
+    });
+    const data = await apiRes.json();
+    if (data.reset_token) {
+      return res.render('password-reset', {
+        layout: 'sub', title: 'Reset your password',
+        flash: { type: 'notice', message: data.message },
+        devLink: `http://localhost:${config.api.port}/login/reset/${data.reset_token}`,
+      });
+    }
+    res.render('password-reset', { layout: 'sub', title: 'Reset your password', flash: { type: 'notice', message: data.message } });
+  } catch {
+    res.render('password-reset', { layout: 'sub', title: 'Reset your password', flash: { type: 'error', message: 'Failed to start password reset' } });
+  }
+});
+
+app.get('/login/reset/:token', (req, res) => {
+  res.render('password-reset-finish', { layout: 'sub', title: 'Reset your password', token: req.params.token, flash: null });
+});
+
+app.post('/login/reset/:token', async (req, res) => {
+  try {
+    const apiRes = await fetch(`http://localhost:${config.api.port}/api/auth/password-reset/${req.params.token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: req.body.password, password_confirmation: req.body.password_confirmation }),
+    });
+    const data = await apiRes.json();
+    if (!apiRes.ok) {
+      return res.render('password-reset-finish', { layout: 'sub', title: 'Reset your password', token: req.params.token, flash: { type: 'error', message: data.error } });
+    }
+    res.redirect('/login');
+  } catch {
+    res.render('password-reset-finish', { layout: 'sub', title: 'Reset your password', token: req.params.token, flash: { type: 'error', message: 'Failed to reset password' } });
+  }
+});
+
 app.get('/portal/dashboard', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -204,7 +291,21 @@ app.get('/portal/dashboard', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { stats: { domains: 0, credentials: 0, messagesSent: 0, held: 0, queued: 0, bounces: 0, todaySent: 0, sendLimit: null }, recentMessages: [], server: { mode: 'live', suspended: false } };
-    res.render('dashboard', { layout: 'application', ...data, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    const outRaw = (data.stats?.graphOutgoing || '').split(',').map((n: string) => parseInt(n || '0'));
+    const inRaw = (data.stats?.graphIncoming || '').split(',').map((n: string) => parseInt(n || '0'));
+    const labels: string[] = [];
+    for (let i = outRaw.length - 1; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      labels.push(d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
+    }
+    res.render('dashboard', {
+      layout: 'application', ...data, ...header, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token,
+      graphLabels: labels,
+      graphSeries: [outRaw.slice().reverse(), inRaw.slice().reverse()],
+      graphData: labels.map((label, i) => ({ label, out: outRaw[outRaw.length - 1 - i], in: inRaw[inRaw.length - 1 - i] })),
+      graphFirstDate: labels[0] || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+    });
   } catch { res.redirect('/login'); }
 });
 
@@ -220,7 +321,9 @@ app.get('/portal/domains', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { domains: [] };
-    res.render('domains', { layout: 'application', ...data, title: 'Domains', active: 'domains', email: userData.user?.email || '', token });
+    const flash = getFlash(req);
+    const header = await fetchServerHeader(token);
+    res.render('domains', { layout: 'application', ...data, ...header, flash, title: 'Domains', active: 'domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -231,7 +334,8 @@ app.get('/portal/domains/add', async (req, res) => {
     const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
-    res.render('add-domain', { layout: 'application', title: 'Add Domain', active: 'domains', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('add-domain', { layout: 'application', ...header, error: req.query.error || null, title: 'Add Domain', active: 'domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -246,11 +350,29 @@ app.get('/portal/domains/:id/setup', async (req, res) => {
     ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
-    const data = dataRes.ok ? await dataRes.json() : { domain: '', checks: {}, dnsRecords: {}, mxRecords: [], dkimRecordName: '', returnPathDomain: '', returnPathTarget: '', spfHost: '' };
-    const domainResult = await fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const domainData = domainResult.ok ? await domainResult.json() : { domains: [] };
-    const domainObj = domainData.domains?.find((d: any) => d.id === req.params.id) || { id: req.params.id, domain: data.domain, dns_checked_at: null };
-    res.render('domain-setup', { layout: 'application', domain: domainObj, checks: data.checks || {}, dnsRecords: data.dnsRecords || { spf: '', dkim: '', mx: '' }, mxRecords: [(data.dnsRecords?.mx || '').split(' ').filter(Boolean).join(' ')], dkimRecordName: (data.dkimSelector || 'mailcouse') + '._domainkey.' + (data.domain || ''), returnPathDomain: 'bounce.' + (data.domain || ''), returnPathTarget: 'live.noblecircle.online', spfHost: data.spfHost || 'live.noblecircle.online', title: 'DNS Setup', active: 'domains', email: userData.user?.email || '', token });
+    const data = dataRes.ok ? await dataRes.json() : {};
+    if (data.redirect) {
+      const flash = data.flash ? `?${data.flash.notice ? 'notice' : 'alert'}=${encodeURIComponent(data.flash.notice || data.flash.alert)}` : '';
+      return res.redirect(data.redirect + flash);
+    }
+    const header = await fetchServerHeader(token);
+    res.render('domain-setup', {
+      layout: 'application',
+      ...header,
+      flash: getFlash(req),
+      id: data.id,
+      name: data.name || req.params.id,
+      dnsCheckedAt: data.dns_checked_at || null,
+      spfRecord: data.spf_record || '',
+      dkimRecordName: data.dkim_record_name || '',
+      dkimRecord: data.dkim_record || '',
+      returnPathDomain: data.return_path_domain || '',
+      returnPathTarget: data.return_path_target || '',
+      mxRecords: data.mx_records || [],
+      checks: data.checks || { spf: { status: null, error: null }, dkim: { status: null, error: null }, mx: { status: null, error: null }, return_path: { status: null, error: null } },
+      spfInclude: (data.spf_record || '').match(/include:([^\s]+)/)?.[1] || config.dns.spfInclude,
+      title: 'DNS Setup', active: 'domains', email: userData.user?.email || '', token,
+    });
   } catch { res.redirect('/login'); }
 });
 
@@ -259,19 +381,29 @@ app.get('/portal/domains/:id/verify', async (req, res) => {
   if (!token) return res.redirect('/login');
   try {
     const base = `http://localhost:${config.api.port}`;
-    const [userRes, dataRes, domainListRes] = await Promise.all([
+    const [userRes, dataRes] = await Promise.all([
       fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
-      fetch(`${base}/api/portal/domains/${req.params.id}/setup`, { headers: { 'Authorization': `Bearer ${token}` } }),
-      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains/${req.params.id}/verify${req.query.email_address ? `?email_address=${encodeURIComponent(req.query.email_address as string)}` : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
     ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : {};
-    const domainListData = domainListRes.ok ? await domainListRes.json() : { domains: [] };
-    const domain = domainListData.domains?.find((d: any) => d.id === req.params.id) || { id: req.params.id, domain: data.domain || '', verified: false, verified_at: null };
-    const verificationString = (data.verificationPrefix || 'mailcouse-verification') + ' ' + (data.verificationToken || '').substring(0, 16);
-    const verificationEmails = ['webmaster@' + data.domain, 'postmaster@' + data.domain, 'admin@' + data.domain, 'administrator@' + data.domain, 'hostmaster@' + data.domain];
-    res.render('domain-verify', { layout: 'application', domain, method: 'dns', verificationString, verificationEmails, sentTo: null, title: 'Verify Domain', active: 'domains', email: userData.user?.email || '', token });
+    if (data.verified && data.redirect) {
+      const flash = data.flash ? `?${data.flash.notice ? 'notice' : 'alert'}=${encodeURIComponent(data.flash.notice || data.flash.alert)}` : '';
+      return res.redirect(data.redirect + flash);
+    }
+    const header = await fetchServerHeader(token);
+    res.render('domain-verify', {
+      layout: 'application',
+      ...header,
+      domainId: data.id || req.params.id,
+      domainName: data.name || '',
+      verificationMethod: data.verification_method || 'DNS',
+      dnsVerificationString: data.dns_verification_string || '',
+      verificationEmailAddresses: data.verification_email_addresses || [],
+      emailAddress: data.email_address || '',
+      title: 'Verify Domain', active: 'domains', email: userData.user?.email || '', token,
+    });
   } catch { res.redirect('/login'); }
 });
 
@@ -287,7 +419,8 @@ app.get('/portal/credentials', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { credentials: [] };
-    res.render('credentials', { layout: 'application', ...data, title: 'Credentials', active: 'credentials', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('credentials', { layout: 'application', ...header, ...data, title: 'Credentials', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -303,7 +436,26 @@ app.get('/portal/credentials/add', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
-    res.render('add-credential', { layout: 'application', domains: domainData.domains || [], title: 'Add Credential', active: 'credentials', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('add-credential', { layout: 'application', ...header, domains: domainData.domains || [], title: 'Add Credential', active: 'credentials', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/credentials/:id/edit', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, credRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/credentials/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    if (credRes.status === 404) return res.redirect('/portal/credentials');
+    const userData = await userRes.json();
+    const credential = await credRes.json();
+    const header = await fetchServerHeader(token);
+    res.render('add-credential', { layout: 'application', ...header, credential, title: 'Edit Credential', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -326,7 +478,8 @@ app.get('/portal/messages/outgoing', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
-    res.render('messages', { layout: 'application', ...data, title: 'Outgoing Messages', scope: 'outgoing', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+    const header = await fetchServerHeader(token);
+    res.render('messages', { layout: 'application', ...header, ...data, title: 'Outgoing Messages', scope: 'outgoing', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/outgoing' });
   } catch { res.redirect('/login'); }
 });
 
@@ -343,7 +496,8 @@ app.get('/portal/messages/incoming', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
-    res.render('messages', { layout: 'application', ...data, title: 'Incoming Messages', scope: 'incoming', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+    const header = await fetchServerHeader(token);
+    res.render('messages', { layout: 'application', ...header, ...data, title: 'Incoming Messages', scope: 'incoming', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/incoming' });
   } catch { res.redirect('/login'); }
 });
 
@@ -360,7 +514,8 @@ app.get('/portal/messages/held', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
-    res.render('messages', { layout: 'application', ...data, title: 'Held Messages', scope: 'held', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+    const header = await fetchServerHeader(token);
+    res.render('messages', { layout: 'application', ...header, ...data, title: 'Held Messages', scope: 'held', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/held' });
   } catch { res.redirect('/login'); }
 });
 
@@ -377,7 +532,8 @@ app.get('/portal/messages/queue', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
-    res.render('messages', { layout: 'application', ...data, title: 'Message Queue', scope: 'queue', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '' });
+    const header = await fetchServerHeader(token);
+    res.render('messages', { layout: 'application', ...header, ...data, title: 'Message Queue', scope: 'queue', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/queue' });
   } catch { res.redirect('/login'); }
 });
 
@@ -393,7 +549,8 @@ app.get('/portal/messages/suppressions', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { suppressions: [] };
-    res.render('messages', { layout: 'application', ...data, title: 'Suppressions', scope: 'suppressions', active: 'messages', email: userData.user?.email || '', token, search: '', status: '' });
+    const header = await fetchServerHeader(token);
+    res.render('messages', { layout: 'application', ...header, ...data, title: 'Suppressions', scope: 'suppressions', active: 'messages', email: userData.user?.email || '', token, search: '', status: '' });
   } catch { res.redirect('/login'); }
 });
 
@@ -419,6 +576,32 @@ app.get('/portal/messages/:id/download', async (req, res) => {
   } catch { res.redirect('/portal/messages'); }
 });
 
+function humanSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const val = bytes / Math.pow(1024, i);
+  return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)} ${units[i]}`;
+}
+
+function parseHeaders(raw: string): { key: string; value: string }[] {
+  const out: { key: string; value: string }[] = [];
+  if (!raw) return out;
+  const lines = raw.split(/\r?\n/);
+  let current: { key: string; value: string } | null = null;
+  for (const line of lines) {
+    if (/^[\t ]/.test(line)) {
+      if (current) current.value += ' ' + line.trim();
+      continue;
+    }
+    const idx = line.indexOf(':');
+    if (idx <= 0) continue;
+    current = { key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    out.push(current);
+  }
+  return out;
+}
+
 app.get('/portal/messages/:id', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -432,7 +615,28 @@ app.get('/portal/messages/:id', async (req, res) => {
     const userData = await userRes.json();
     if (!msgRes.ok) return res.redirect('/portal/messages');
     const data = await msgRes.json();
-    res.render('message-detail', { layout: 'application', msg: data.message, title: 'Message', active: 'messages', tab: req.query.tab || 'properties', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('message-detail', { layout: 'application', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: 'properties', humanSize, parseHeaders, email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/messages/:id/:tab', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  const tabs = ['activity', 'headers', 'spam', 'plain', 'html', 'attachments', 'raw'];
+  if (!tabs.includes(req.params.tab)) return res.redirect('/portal/messages');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, msgRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/messages/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    if (!msgRes.ok) return res.redirect('/portal/messages');
+    const data = await msgRes.json();
+    const header = await fetchServerHeader(token);
+    res.render('message-detail', { layout: 'application', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: req.params.tab, humanSize, parseHeaders, email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -449,7 +653,8 @@ app.get('/portal/webhooks/history', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { requests: [], pagination: { page: 1, totalPages: 1 } };
-    res.render('webhook-history', { layout: 'application', ...data, title: 'Webhook History', active: 'webhooks', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('webhook-history', { layout: 'application', ...header, ...data, title: 'Webhook History', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -466,7 +671,8 @@ app.get('/portal/webhooks/history/:uuid', async (req, res) => {
     const userData = await userRes.json();
     if (!dataRes.ok) return res.redirect('/portal/webhooks/history');
     const data = await dataRes.json();
-    res.render('webhook-request', { layout: 'application', req: data.request, title: 'Webhook Request', active: 'webhooks', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('webhook-request', { layout: 'application', ...header, request: data.request, title: 'Webhook Request', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -482,7 +688,8 @@ app.get('/portal/settings/limits', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { server: {} };
-    res.render('settings-limits', { layout: 'application', server: data.server, title: 'Send Limit', active: 'settings', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('settings-limits', { layout: 'application', ...header, server: data.server, title: 'Send Limit', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -498,7 +705,45 @@ app.get('/portal/settings/retention', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { server: {} };
-    res.render('settings-retention', { layout: 'application', server: data.server, title: 'Message Retention', active: 'settings', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('settings-retention', { layout: 'application', ...header, server: data.server, title: 'Message Retention', active: 'settings', humanSize, email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/settings/spam', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/settings`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { server: {} };
+    const server = data.server || {};
+    const header = await fetchServerHeader(token);
+    res.render('settings-spam', {
+      layout: 'application', ...header,
+      server,
+      spamThreshold: server.spam_threshold ?? 5,
+      spamFailureThreshold: server.spam_failure_threshold ?? 20,
+      outboundSpamThreshold: server.outbound_spam_threshold ?? null,
+      title: 'Spam Handling', active: 'settings', email: userData.user?.email || '', token,
+    });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/settings/delete', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const header = await fetchServerHeader(token);
+    res.render('settings-delete', { layout: 'application', ...header, title: 'Delete Server', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -514,7 +759,8 @@ app.get('/portal/settings/advanced', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { server: {} };
-    res.render('settings-advanced', { layout: 'application', server: data.server, title: 'Advanced Settings', active: 'settings', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('settings-advanced', { layout: 'application', ...header, server: data.server, title: 'Advanced Settings', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -523,16 +769,22 @@ app.get('/portal/help/outgoing', async (req, res) => {
   if (!token) return res.redirect('/login');
   try {
     const base = `http://localhost:${config.api.port}`;
-    const [userRes] = await Promise.all([
+    const [userRes, settingsRes] = await Promise.all([
       fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/settings`, { headers: { 'Authorization': `Bearer ${token}` } }),
     ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
+    const settingsData = settingsRes.ok ? await settingsRes.json() : { server: null, credentials: [] };
+    const header = await fetchServerHeader(token);
     res.render('help-outgoing', {
-      layout: 'application', title: 'Help — Sending E-Mail', active: 'help',
+      layout: 'application', ...header, title: 'Help — Sending E-Mail', active: 'help',
       email: userData.user?.email || '', token,
-      smtpHost: config.api.host, smtpPort: config.platform.smtpPort,
-      credentialName: 'u_' + (userData.user?.id || '').substring(0, 8),
+      smtpHost: config.dns.heloHostname || config.api.host,
+      smtpPort: config.platform.smtpPort,
+      smtpUsername: settingsData.credentials?.[0]?.username || '',
+      permalink: (settingsData.server?.name || 'mailserver') + '.' + config.dns.routeDomain,
+      maxAttempts: 3,
     });
   } catch { res.redirect('/login'); }
 });
@@ -547,7 +799,12 @@ app.get('/portal/help/incoming', async (req, res) => {
     ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
-    res.render('help-incoming', { layout: 'application', title: 'Help — Receiving E-Mail', active: 'help', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('help-incoming', {
+      layout: 'application', ...header, title: 'Help — Receiving E-Mail', active: 'help',
+      email: userData.user?.email || '', token,
+      mxRecords: config.dns.mxRecords,
+    });
   } catch { res.redirect('/login'); }
 });
 
@@ -566,8 +823,10 @@ app.get('/portal/send', async (req, res) => {
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const routeData = routeRes.ok ? await routeRes.json() : { routes: [] };
     const firstDomain = domainData.domains?.find((d: any) => d.verified);
+    const header = await fetchServerHeader(token);
     res.render('send-message', {
       layout: 'application',
+      ...header,
       title: 'Send Message',
       active: 'messages',
       email: userData.user?.email || '',
@@ -597,7 +856,8 @@ app.get('/portal/settings', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { organization: {}, members: [] };
-    res.render('settings', { layout: 'application', org: data.organization, members: data.members, title: 'Settings', active: 'settings', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('settings', { layout: 'application', ...header, org: data.organization, members: data.members, title: 'Settings', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -635,18 +895,53 @@ app.get('/portal/routes', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { routes: [] };
-    res.render('routes', { layout: 'application', ...data, title: 'Routes', active: 'routes', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('routes', { layout: 'application', ...data, ...header, endpointCounts: data.endpoint_counts || { total: 0, http: 0, smtp: 0, address: 0 }, title: 'Routes', active: 'routes', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/endpoints/:type', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  const type = ['http', 'smtp', 'address'].includes(req.params.type) ? req.params.type : 'http';
+  res.redirect(`/portal/routes/add?endpoint=${type}`);
 });
 
 app.get('/portal/routes/add', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
   try {
-    const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, domainRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
-    res.render('add-route', { layout: 'application', title: 'Add Route', active: 'routes', email: userData.user?.email || '', token });
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
+    const header = await fetchServerHeader(token);
+    res.render('add-route', { layout: 'application', ...header, domains: domainData.domains || [], endpoint: (req.query.endpoint as string) || '', title: 'Add Route', active: 'routes', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/routes/:id/edit', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, routeRes, domainRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/routes`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const routeData = routeRes.ok ? await routeRes.json() : { routes: [] };
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
+    const route = (routeData.routes || []).find((r: any) => r.id === req.params.id);
+    if (!route) return res.redirect('/portal/routes');
+    const header = await fetchServerHeader(token);
+    res.render('add-route', { layout: 'application', ...header, domains: domainData.domains || [], route, endpoint: (route.endpoint_type || '').toLowerCase(), title: 'Edit Route', active: 'routes', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -662,7 +957,8 @@ app.get('/portal/webhooks', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { webhooks: [] };
-    res.render('webhooks', { layout: 'application', ...data, title: 'Webhooks', active: 'webhooks', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('webhooks', { layout: 'application', ...header, ...data, title: 'Webhooks', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -673,7 +969,26 @@ app.get('/portal/webhooks/add', async (req, res) => {
     const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
-    res.render('add-webhook', { layout: 'application', title: 'Add Webhook', active: 'webhooks', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('add-webhook', { layout: 'application', ...header, title: 'Add Webhook', active: 'webhooks', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/webhooks/:id/edit', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, webhookRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/webhooks/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    if (!webhookRes.ok) return res.redirect('/portal/webhooks');
+    const userData = await userRes.json();
+    const webhook = await webhookRes.json();
+    const header = await fetchServerHeader(token);
+    res.render('add-webhook', { layout: 'application', ...header, webhook, title: 'Edit Webhook', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -689,7 +1004,8 @@ app.get('/portal/track-domains', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { trackDomains: [] };
-    res.render('track-domains', { layout: 'application', ...data, title: 'Tracking Domains', active: 'track-domains', email: userData.user?.email || '', token });
+    const header = await fetchServerHeader(token);
+    res.render('track-domains', { layout: 'application', ...header, ...data, title: 'Tracking Domains', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -697,10 +1013,36 @@ app.get('/portal/track-domains/add', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
   try {
-    const userRes = await fetch(`http://localhost:${config.api.port}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, domainRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
-    res.render('add-track-domain', { layout: 'application', title: 'Add Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
+    const header = await fetchServerHeader(token);
+    res.render('add-track-domain', { layout: 'application', ...header, domains: domainData.domains || [], title: 'Add Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/track-domains/:id/edit', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, domainRes, tdRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/track-domains/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    if (!tdRes.ok) return res.redirect('/portal/track-domains');
+    const userData = await userRes.json();
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
+    const trackDomain = await tdRes.json();
+    const header = await fetchServerHeader(token);
+    res.render('add-track-domain', { layout: 'application', ...header, domains: domainData.domains || [], trackDomain, title: 'Edit Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 

@@ -1,19 +1,20 @@
-<div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr; Domains &rarr;</span>
-    <%= domain.domain %>
-  </h1>
-</div>
-
-<nav class="navBar navBar--secondary">
-  <ul>
-    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
-    <li class="navBar__item"><a href="/portal/domains/<%= domain.id %>/setup" class="navBar__link is-active">DNS Setup</a></li>
-  </ul>
-</nav>
-
+<% function timeAgo(dateStr) {
+  if (!dateStr) return null;
+  var then = new Date(dateStr).getTime();
+  var now = Date.now();
+  var seconds = Math.floor((now - then) / 1000);
+  if (seconds < 60) return 'less than a minute';
+  var minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + (minutes === 1 ? ' minute' : ' minutes');
+  var hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + (hours === 1 ? ' hour' : ' hours');
+  var days = Math.floor(hours / 24);
+  return days + (days === 1 ? ' day' : ' days');
+} %>
+<%- include('partials/server-header', { activeNav: 'domains', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<%- include('partials/domains-nav', { activeNav: 'domains' }) %>
 <div class="pageContent pageContent--compact">
-  <h2 class="pageContent__title">DNS Setup for <%= domain.domain %></h2>
+  <h2 class="pageContent__title">DNS Setup for <%= name %></h2>
   <p class="pageContent__intro u-margin">
     Follow the instructions below to configure SPF &amp; DKIM records for this domain.
     We highly recommend that you do this to ensure your messages are delivered
@@ -21,95 +22,121 @@
   </p>
 
   <div class="u-margin buttonSet">
-    <a href="javascript:checkDomainDNS()" class="button" id="check-dns-btn">Check my records are correct</a>
+    <button id="check-dns-btn" class="button">Check my records are correct</button>
     <a href="/portal/domains" class="button button--neutral">Back to domain list</a>
   </div>
-  <% if (domain.dns_checked_at) { %>
-    <p class="u-margin">We last checked the validity of your DNS records at <%= domain.dns_checked_at %>.</p>
+  <% if (dnsCheckedAt) { %>
+    <p class="u-margin">We last checked the validity of your DNS records <%= timeAgo(dnsCheckedAt) %> ago.</p>
   <% } %>
 
-  <!-- SPF Record -->
   <h3 class="pageContent__subTitle">SPF Record</h3>
-  <% if (checks.spf === 'ok') { %>
-    <p class="pageContent__text u-green u-bold"><span class="label label--green">Good</span> Your SPF record looks good!</p>
-  <% } else if (checks.spf) { %>
-    <p class="pageContent__text u-orange u-bold"><span class="label label--orange">Warning</span> SPF record not found or incorrect.</p>
+  <% if (checks.spf.status === 'OK') { %>
+    <p class="pageContent__text u-green u-bold">
+      <span class="label label--green">Good</span>
+      Your SPF record looks good!
+    </p>
+  <% } else if (checks.spf.status) { %>
+    <p class="pageContent__text u-orange u-bold">
+      <span class="label label--orange">Warning</span>
+      <%= checks.spf.error %>
+    </p>
   <% } %>
+
   <p class="pageContent__text">
     You need to add a TXT record at the apex/root of your domain (@) with the following
     content. If you already send mail from another service, you may just need to add
-    <b>include:<%= spfHost %></b> to your existing record.
+    <b>include:<%= spfInclude %></b> to your existing record.
   </p>
-  <pre class="codeBlock u-margin"><%= dnsRecords.spf %></pre>
+  <pre class="codeBlock u-margin"><%= spfRecord %></pre>
 
-  <!-- DKIM Record -->
   <h3 class="pageContent__subTitle">DKIM Record</h3>
-  <% if (checks.dkim === 'ok') { %>
-    <p class="pageContent__text u-green u-bold"><span class="label label--green">Good</span> Your DKIM record looks good!</p>
-  <% } else if (checks.dkim) { %>
-    <p class="pageContent__text u-orange u-bold"><span class="label label--orange">Warning</span> DKIM record not found or incorrect.</p>
+  <% if (checks.dkim.status === 'OK') { %>
+    <p class="pageContent__text u-green u-bold">
+      <span class="label label--green">Good</span>
+      Your DKIM record looks good!
+    </p>
+  <% } else if (checks.dkim.status) { %>
+    <p class="pageContent__text u-orange u-bold">
+      <span class="label label--orange">Warning</span>
+      <%= checks.dkim.error %>
+    </p>
   <% } %>
+
   <p class="pageContent__text">
     You need to add a new TXT record with the name <b><%= dkimRecordName %></b>
     with the following content.
   </p>
-  <pre class="codeBlock u-margin"><%= dnsRecords.dkim %></pre>
+  <pre class="codeBlock u-margin"><%= dkimRecord %></pre>
 
-  <!-- Return Path -->
   <h3 class="pageContent__subTitle">Return Path</h3>
-  <% if (checks.return_path === 'ok') { %>
-    <p class="pageContent__text u-green u-bold"><span class="label label--green">Good</span> Your return path looks good. We'll use this when sending e-mail from this domain.</p>
-  <% } else if (checks.return_path === 'missing') { %>
-    <p class="pageContent__text u-grey u-bold"><span class="label label--grey">OK</span> There's no return path for this domain. This is OK but we recommend adding the record to improve deliverability and achieve DMARC alignment.</p>
-  <% } else if (checks.return_path) { %>
-    <p class="pageContent__text u-orange u-bold"><span class="label label--orange">Warning</span> Return path configuration error.</p>
+  <% if (checks.return_path.status === 'OK') { %>
+    <p class="pageContent__text u-green u-bold">
+      <span class="label label--green">Good</span>
+      Your return path looks good. We'll use this when sending e-mail from this domain.
+    </p>
+  <% } else if (checks.return_path.status === 'Missing') { %>
+    <p class="pageContent__text u-grey u-bold">
+      <span class="label label--grey">OK</span>
+      There's no return path for this domain. This is OK but we recommend adding the record to improve deliverability and achieve DMARC alignment.
+    </p>
+  <% } else if (checks.return_path.status) { %>
+    <p class="pageContent__text u-orange u-bold">
+      <span class="label label--orange">Warning</span>
+      <%= checks.return_path.error %>
+    </p>
   <% } %>
+
   <p class="pageContent__text">
     This is optional but we recommend adding this to improve deliverability. You should add
     a <b>CNAME</b> record at <b><%= returnPathDomain %></b> to point to the hostname below.
   </p>
   <pre class="codeBlock u-margin"><%= returnPathTarget %></pre>
 
-  <!-- MX Records -->
   <h3 class="pageContent__subTitle">MX Records</h3>
-  <% if (checks.mx === 'ok') { %>
-    <p class="pageContent__text u-green u-bold"><span class="label label--green">Good</span> Your MX records look like they're good to go!</p>
-  <% } else if (checks.mx === 'missing') { %>
-    <p class="pageContent__text u-grey u-bold"><span class="label label--grey">OK</span> None of the MX records for this domain point to us. Incoming mail won't be sent to us.</p>
-  <% } else if (checks.mx) { %>
-    <p class="pageContent__text u-orange u-bold"><span class="label label--orange">Warning</span> MX record configured incorrectly.</p>
+  <% if (checks.mx.status === 'OK') { %>
+    <p class="pageContent__text u-green u-bold">
+      <span class="label label--green">Good</span>
+      Your MX records look like they're good to go!
+    </p>
+  <% } else if (checks.mx.status === 'Missing') { %>
+    <p class="pageContent__text u-grey u-bold">
+      <span class="label label--grey">OK</span>
+      None of the MX records for this domain point to us. Incoming mail won't be sent to us.
+    </p>
+  <% } else if (checks.mx.status) { %>
+    <p class="pageContent__text u-orange u-bold">
+      <span class="label label--orange">Warning</span>
+      <%= checks.mx.error %>
+    </p>
   <% } %>
+
   <p class="pageContent__text">
     If you wish to receive incoming e-mail for this domain, you need to add the following MX records
     to the domain. You don't have to do this and we'll only tell you if they're set up or not. Both
     records should be priority <b>10</b>.
   </p>
   <pre class="codeBlock u-margin"><%= mxRecords.join('\n') %></pre>
-
-  <div class="buttonSet u-margin">
-    <a href="javascript:checkDomainDNS()" class="button">Check my records are correct</a>
-    <a href="/portal/domains/<%= domain.id %>/verify" class="button button--positive">Verify domain</a>
-  </div>
 </div>
-
 <script>
-async function checkDomainDNS() {
+(function() {
   var btn = document.getElementById('check-dns-btn');
-  btn.textContent = 'Checking...';
-  btn.classList.add('button--neutral');
-  btn.disabled = true;
-  try {
-    var r = await fetch('/api/portal/domains/check', {
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    fetch('/api/portal/domains/<%= id %>/check', {
       method: 'POST',
-      headers: { 'Content-Type':'application/json','Authorization':'Bearer <%= token %>' },
-      body: JSON.stringify({ id: '<%= domain.id %>' })
+      headers: { 'Authorization': 'Bearer <%= token %>' }
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      var url = data.redirect || '/portal/domains';
+      if (data.flash) {
+        url += (url.indexOf('?') === -1 ? '?' : '&') + (data.flash.notice ? 'notice=' : 'alert=') + encodeURIComponent(data.flash.notice || data.flash.alert);
+      }
+      window.location.href = url;
+    }).catch(function() {
+      btn.disabled = false;
+      btn.textContent = 'Check my records are correct';
     });
-    location.reload();
-  } catch(e) {
-    alert('DNS check failed: ' + e.message);
-    btn.textContent = 'Check my records are correct';
-    btn.classList.remove('button--neutral');
-    btn.disabled = false;
-  }
-}
+  });
+})();
 </script>

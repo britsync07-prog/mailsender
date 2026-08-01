@@ -1,37 +1,15 @@
+<!-- Server list page - shows current server info, no multi-server in MVP -->
 <div class="pageHeader">
-  <h1 class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Organization &rarr;</span>
-    Servers
-  </h1>
+  <h1 class="pageHeader__title">Mail Servers</h1>
 </div>
-
-<nav class="navBar navBar--secondary">
-  <ul>
-    <li class="navBar__item"><a href="/portal/servers" class="navBar__link is-active">Servers</a></li>
-  </ul>
-</nav>
-
-<div class="pageContent">
-  <% if (!servers || servers.length === 0) { %>
-    <div class="noData noData--clean">
-      <h2 class="noData__title">No servers configured.</h2>
-      <p class="noData__text">Servers are used to group your sending configuration.</p>
+<div class="pageContent pageContent--compact">
+  <p class="pageContent__intro u-margin">Your mail server is ready to send and receive e-mail.</p>
+  <div class="largeList">
+    <div class="largeList__item">
+      <div class="largeList__link">
+        <p class="largeList__title"><a href="/portal/dashboard">Mail Server</a></p>
+        <p class="largeList__text"><%= serverMode === 'live' ? 'Live' : 'Development' %} mode</p>
+      </div>
     </div>
-  <% } else { %>
-    <ul class="largeList u-margin">
-      <% servers.forEach(function(s) { %>
-        <li class="largeList__item">
-          <a href="/portal/dashboard" class="largeList__link">
-            <%= s.name || 'Mail Server' %>
-            <% if (s.mode) { %><span class="largeList__rightLabel"><span class="label label--<%= s.mode === 'live' ? 'green' : 'orange' %>"><%= s.mode %></span></span><% } %>
-            <div class="largeList__subText">
-              Created: <%= new Date(s.created_at).toLocaleDateString() %>
-              <% if (s.send_limit) { %> &middot; Limit: <%= s.send_limit %>/day<% } %>
-              <% if (s.return_path_domain) { %> &middot; Return-Path: <%= s.return_path_domain %><% } %>
-            </div>
-          </a>
-        </li>
-      <% }) %>
-    </ul>
-  <% } %>
+  </div>
 </div>

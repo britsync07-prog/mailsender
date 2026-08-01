@@ -1,60 +1,57 @@
-<div class="pageHeader">
-  <div class="pageHeader__title">
-    <span class="pageHeader__titlePrevious">Webhooks &rarr;</span>
-    History
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">DKIM &amp; SPF configured correctly</li>
+    </ul>
   </div>
 </div>
-
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link is-active">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+    <li class="navBar__item navBar__item--end"><a href="/portal/help/outgoing" class="navBar__link">Help</a></li>
+  </ul>
+</nav>
 <nav class="navBar navBar--secondary">
   <ul>
     <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Manage Webhooks</a></li>
     <li class="navBar__item"><a href="/portal/webhooks/history" class="navBar__link is-active">View History</a></li>
   </ul>
 </nav>
-
 <div class="pageContent pageContent--compact">
-  <% if (!requests || requests.length === 0) { %>
+  <% if (requests.length === 0) { %>
     <div class="noData noData--clean">
       <h2 class="noData__title">No webhook requests recorded.</h2>
-      <p class="noData__text">
-        This page shows the last 10 days worth of webhook requests that have been sent. This page will
-        populate automatically as webhooks are dispatched.
-      </p>
+      <p class="noData__text">This page shows the last 10 days worth of webhook requests that have been sent by Postal. This page will populate automatically as webhooks are dispatched.</p>
     </div>
   <% } else { %>
-    <p class="pageContent__intro u-margin">
-      This page shows a list of all webhook requests which have been sent for this server. These are kept for 10 days before being
-      removed. Click on a request for additional information.
-    </p>
+    <p class="pageContent__intro u-margin">This page shows a list of all webhook requests which have been sent for this server. These are kept for 10 days before being removed. Click on a request for additional information.</p>
     <ul class="webhookRequestList">
-      <% requests.forEach(function(req) { %>
+      <% requests.forEach(function(r) { %>
         <li class="webhookRequestList__item">
-          <a href="/portal/webhooks/history/<%= req.uuid || req.id %>" class="webhookRequestList__link">
+          <a href="/portal/webhooks/history/<%= r.uuid || r.id %>" class="webhookRequestList__link">
             <div class="webhookRequestList__top">
-              <p class="webhookRequestList__status">
-                <span class="label label--http-status-<%= String(req.status_code || req.status)[0] %>"><%= req.status_code || req.status %></span>
-              </p>
-              <p class="webhookRequestList__time"><%= new Date(req.timestamp || req.created_at).toLocaleString() %></p>
-              <p class="webhookRequestList__event"><%= req.event || 'webhook' %></p>
+              <p class="webhookRequestList__status"><span class="label label--http-status-<%= String(r.status_code || r.response_code || 200).charAt(0) %>"><%= r.status_code || r.response_code || 200 %></span></p>
+              <p class="webhookRequestList__time"><%= new Date(r.timestamp || r.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/,/g, ' at') %></p>
+              <p class="webhookRequestList__event"><%= r.event || r.event_type %></p>
             </div>
-            <p class="webhookRequestList__url"><%= req.url || req.endpoint_url || 'Unknown' %></p>
+            <p class="webhookRequestList__url"><%= r.url || 'Unknown' %></p>
           </a>
         </li>
       <% }) %>
     </ul>
-
     <% if (pagination && pagination.totalPages > 1) { %>
       <div class="simplePagination">
-        <p class="simplePagination__previous">
-          <% if (pagination.page > 1) { %><a href="?page=<%= pagination.page - 1 %>" class="simplePagination__link">&larr; Previous</a><% } %>
-        </p>
-        <div class="simplePagination__current">
-          <p class="simplePagination__info"><%= pagination.total %> requests</p>
-          <p>Page <%= pagination.page %> of <%= pagination.totalPages %></p>
-        </div>
-        <p class="simplePagination__next">
-          <% if (pagination.page < pagination.totalPages) { %><a href="?page=<%= pagination.page + 1 %>" class="simplePagination__link">Next &rarr;</a><% } %>
-        </p>
+        <% if (pagination.page > 1) { %><a href="?page=<%= pagination.page - 1 %>" class="simplePagination__link">&larr; Previous page</a><% } %>
+        <span>Page <%= pagination.page %> of <%= pagination.totalPages %></span>
+        <% if (pagination.totalPages > pagination.page) { %><a href="?page=<%= pagination.page + 1 %>" class="simplePagination__link">Next page &rarr;</a><% } %>
       </div>
     <% } %>
   <% } %>
