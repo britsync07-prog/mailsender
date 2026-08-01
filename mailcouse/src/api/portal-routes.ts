@@ -16,6 +16,7 @@ import {
   returnPathDomain,
   dnsVerificationString,
   checkDomainDNS,
+  findVerifiedDomainForAddress,
 } from './domain-logic';
 import crypto from 'crypto';
 import * as dns from 'dns';
@@ -272,14 +273,10 @@ router.post('/send', async (req: Request, res: Response) => {
     const domainPart = from.split('@')[1]?.toLowerCase();
     if (!domainPart) return res.status(400).json({ error: 'Invalid from address' });
 
-    const domainResult = await query(
-      `SELECT id, domain FROM customer_domains WHERE LOWER(domain) = $1 AND organization_id = $2 AND verified = true`,
-      [domainPart, orgId]
-    );
-    if (domainResult.rows.length === 0) {
+    const customerDomain = await findVerifiedDomainForAddress(domainPart, orgId);
+    if (!customerDomain) {
       return res.status(400).json({ error: `From domain ${domainPart} is not verified for this account` });
     }
-    const customerDomain = domainResult.rows[0];
 
     const msgId = `<${crypto.randomUUID()}@${customerDomain.domain}>`;
     const recipients = to.split(/,\s*/).filter(Boolean);
