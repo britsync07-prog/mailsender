@@ -14,6 +14,50 @@
 </nav>
 
 <div class="pageContent">
+  <% if (typeof flash !== 'undefined' && flash) { %>
+    <div class="flashMessage <%= flash.type === 'notice' ? 'flashMessage--notice' : '' %>"><%= flash.message %></div>
+  <% } %>
+
+  <div class="subPageBox u-margin">
+    <h3 class="subPageBox__title">Provision Subdomains</h3>
+    <% if ((domains || []).length === 0) { %>
+      <p class="pageContent__text">Add and verify a sending domain before creating subdomains.</p>
+    <% } else { %>
+      <form id="provision-subdomains-form" class="fieldSet">
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="provision_domain_id">Domain</label>
+          <div class="fieldSet__input">
+            <select name="domain_id" id="provision_domain_id" class="input input--select">
+              <% domains.forEach(function(d) { %>
+                <option value="<%= d.id %>"><%= d.domain %><%= d.verified ? '' : ' (not verified)' %></option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="provision_count">Count</label>
+          <div class="fieldSet__input"><input type="number" name="count" id="provision_count" min="1" max="500" value="24" class="input input--text"></div>
+        </div>
+        <div class="fieldSet__field">
+          <label class="fieldSet__label" for="provision_naming_scheme">Names</label>
+          <div class="fieldSet__input">
+            <select name="naming_scheme" id="provision_naming_scheme" class="input input--select">
+              <option value="smtp">smtp001, smtp002...</option>
+              <option value="mail">mail001, mail002...</option>
+              <option value="outbound">out001, out002...</option>
+              <option value="custom">Custom prefix</option>
+            </select>
+            <p class="u-margin"><input type="text" name="custom_prefix" id="provision_custom_prefix" placeholder="custom prefix" class="input input--text"></p>
+          </div>
+        </div>
+        <div class="fieldSetSubmit">
+          <input type="submit" value="Create subdomains" class="button button--positive js-provision-submit">
+          <a href="javascript:activateAllSubdomains()" class="button" id="activate-all-btn">Activate all warmup</a>
+        </div>
+      </form>
+    <% } %>
+  </div>
+
   <% if (subdomains.length === 0) { %>
     <div class="noData noData--clean">
       <h2 class="noData__title">No subdomains found.</h2>
@@ -30,6 +74,7 @@
           <th>Total Sent</th>
           <th>Today</th>
           <th>Limit</th>
+          <th>DNS</th>
           <th>Status</th>
           <th>Warmup</th>
           <th></th>
@@ -44,7 +89,8 @@
             <td class="dataTable__centerCell"><%= s.total_sent %></td>
             <td class="dataTable__centerCell"><%= s.emails_sent_today %></td>
             <td class="dataTable__centerCell"><span id="limit-<%= s.id %>"><%= s.daily_limit %></span></td>
-            <td><span class="label label--<%= s.status === 'active' ? 'green' : 'amber' %>"><%= s.status %></span></td>
+            <td><span class="label label--<%= s.dns_verified ? 'green' : 'amber' %>"><%= s.dns_verified ? 'Ready' : 'Pending' %></span></td>
+            <td><span class="label label--<%= s.status === 'active' ? 'green' : (s.status === 'warming' ? 'blue' : 'amber') %>"><%= s.status %></span></td>
             <td class="dataTable__centerCell"><%= s.warmup_complete ? '&#10003;' : '&#8212;' %></td>
             <td><a href="javascript:showEditLimit('<%= s.id %>', '<%= s.subdomain %>', <%= s.daily_limit %>)" class="button button--small">Edit</a></td>
           </tr>
@@ -61,7 +107,7 @@
     <div class="modal__body">
       <p id="limit-subdomain-label"></p>
       <div class="form-group">
-        <label>Daily Limit (1–1000)</label>
+        <label>Daily Limit (1-1000)</label>
         <input type="number" id="edit-limit-value" min="1" max="1000" value="10" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:3px">
         <p style="color:#999;font-size:12px;margin-top:6px">Current limit: <span id="current-limit"></span></p>
       </div>
@@ -75,6 +121,7 @@
 
 <script>
 let editingSubdomainId = null;
+var token = 'Bearer <%= token %>';
 
 function searchSubdomains() {
   const s = document.getElementById('search').value;
@@ -102,7 +149,7 @@ async function saveLimit() {
   try {
     const res = await fetch('/api/portal/subdomains/' + editingSubdomainId + '/limit', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer <%= token %>' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
       body: JSON.stringify({ daily_limit: val })
     });
     const data = await res.json();
@@ -112,4 +159,46 @@ async function saveLimit() {
   } catch(e) { alert('Error: ' + e.message); }
   btn.textContent = 'Save'; btn.style.pointerEvents = 'auto';
 }
+
+async function activateAllSubdomains() {
+  const btn = document.getElementById('activate-all-btn');
+  btn.textContent = 'Activating...'; btn.style.pointerEvents = 'none';
+  try {
+    const res = await fetch('/api/portal/subdomains/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.error || 'Activation failed');
+    location.href = '/portal/subdomains?notice=' + encodeURIComponent((data.activated || 0) + ' subdomains activated.');
+  } catch(e) { alert('Error: ' + e.message); }
+  btn.textContent = 'Activate all warmup'; btn.style.pointerEvents = 'auto';
+}
+
+(function() {
+  var form = document.getElementById('provision-subdomains-form');
+  if (!form) return;
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var btn = form.querySelector('.js-provision-submit');
+    btn.disabled = true; btn.value = 'Creating...';
+    fetch('/api/portal/subdomains', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
+      body: JSON.stringify({
+        domain_id: form.domain_id.value,
+        count: form.count.value,
+        naming_scheme: form.naming_scheme.value,
+        custom_prefix: form.custom_prefix.value
+      })
+    }).then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); }).then(function(result) {
+      if (!result.ok) throw new Error(result.data.error || 'Provisioning failed');
+      location.href = '/portal/subdomains?notice=' + encodeURIComponent(result.data.created + ' subdomains created.');
+    }).catch(function(err) {
+      alert(err.message);
+      btn.disabled = false; btn.value = 'Create subdomains';
+    });
+  });
+})();
 </script>

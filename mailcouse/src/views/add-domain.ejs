@@ -24,6 +24,27 @@
           </p>
         </div>
       </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="subdomain_count">Subdomain pool</label>
+        <div class="fieldSet__input">
+          <input type="number" name="subdomain_count" id="subdomain_count" min="0" max="500" value="24" class="input input--text">
+          <p class="fieldSet__text">
+            Create this many sending subdomains for the domain. They stay inactive until the domain is verified and DNS is checked.
+          </p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="naming_scheme">Subdomain names</label>
+        <div class="fieldSet__input">
+          <select name="naming_scheme" id="naming_scheme" class="input input--select">
+            <option value="smtp">smtp001, smtp002...</option>
+            <option value="mail">mail001, mail002...</option>
+            <option value="outbound">out001, out002...</option>
+            <option value="custom">Custom prefix</option>
+          </select>
+          <p class="u-margin"><input type="text" name="custom_prefix" id="custom_prefix" placeholder="custom prefix" class="input input--text"></p>
+        </div>
+      </div>
     </fieldset>
     <div class="fieldSetSubmit">
       <input type="submit" value="Add domain" class="button button--positive js-form-submit">
@@ -42,7 +63,7 @@
     fetch('/api/portal/domains', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer <%= token %>' },
-      body: JSON.stringify({ domain: form.domain.value, verification_method: form.verification_method.value })
+      body: JSON.stringify({ domain: form.domain.value, verification_method: form.verification_method.value, subdomain_count: form.subdomain_count.value, naming_scheme: form.naming_scheme.value, custom_prefix: form.custom_prefix.value })
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.error) {
         var box = document.querySelector('.errorExplanation');

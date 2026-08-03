@@ -25,6 +25,19 @@
     <button id="check-dns-btn" class="button">Check my records are correct</button>
     <a href="/portal/domains" class="button button--neutral">Back to domain list</a>
   </div>
+  <div class="subPageBox u-margin">
+    <h3 class="subPageBox__title">Sending Subdomains</h3>
+    <p class="pageContent__text">
+      This domain has <b><%= subdomainPool.total %></b> sending subdomains:
+      <b><%= subdomainPool.active %></b> active,
+      <b><%= subdomainPool.warming %></b> warming,
+      <b><%= subdomainPool.inactive %></b> inactive.
+    </p>
+    <div class="buttonSet">
+      <a href="/portal/subdomains?search=<%= encodeURIComponent(name) %>" class="button button--neutral">View subdomains</a>
+      <button id="activate-subdomains-btn" class="button">Activate warmup</button>
+    </div>
+  </div>
   <% if (dnsCheckedAt) { %>
     <p class="u-margin">We last checked the validity of your DNS records <%= timeAgo(dnsCheckedAt) %> ago.</p>
   <% } %>
@@ -119,6 +132,24 @@
 </div>
 <script>
 (function() {
+  var activateBtn = document.getElementById('activate-subdomains-btn');
+  if (activateBtn) {
+    activateBtn.addEventListener('click', function() {
+      activateBtn.disabled = true;
+      activateBtn.textContent = 'Activating...';
+      fetch('/api/portal/subdomains/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer <%= token %>' },
+        body: JSON.stringify({ domain_id: '<%= id %>' })
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        var count = data.activated || 0;
+        window.location.href = '/portal/subdomains?search=<%= encodeURIComponent(name) %>&notice=' + encodeURIComponent(count + ' subdomains activated for warmup.');
+      }).catch(function() {
+        activateBtn.disabled = false;
+        activateBtn.textContent = 'Activate warmup';
+      });
+    });
+  }
   var btn = document.getElementById('check-dns-btn');
   if (!btn) return;
   btn.addEventListener('click', function() {

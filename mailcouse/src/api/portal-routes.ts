@@ -3,6 +3,7 @@ import { query } from '../db/connection';
 import { authenticate, requireOrg } from './auth-middleware';
 import { generateKeyPair, extractPublicKeyBase64 } from '../dkim/key-generator';
 import { encryptPrivateKey, getDomainDKIMPrivateKey } from '../dkim/key-store';
+import { activateSubdomainBatch, provisionSubdomainBatch } from '../segmentation/subdomain-provisioner';
 import { config } from '../config';
 import {
   VERIFICATION_METHODS,
@@ -25,6 +26,81 @@ import * as net from 'net';
 const router = Router();
 router.use(authenticate);
 router.use(requireOrg);
+const DEFAULT_SUBDOMAIN_COUNT = 24;
+const MAX_PORTAL_SUBDOMAIN_COUNT = 500;
+const DEFAULT_INDUSTRY = 'general';
+const DEFAULT_REGISTRAR = 'manual';
+
+function parseSubdomainCount(value: unknown): number {
+  const parsed = parseInt(String(value ?? DEFAULT_SUBDOMAIN_COUNT), 10);
+  if (Number.isNaN(parsed)) return DEFAULT_SUBDOMAIN_COUNT;
+  return Math.min(MAX_PORTAL_SUBDOMAIN_COUNT, Math.max(0, parsed));
+}
+
+function normalizeNamingScheme(value: unknown): 'smtp' | 'mail' | 'outbound' | 'custom' {
+  return ['smtp', 'mail', 'outbound', 'custom'].includes(String(value)) ? String(value) as any : 'smtp';
+}
+
+async function ensurePoolDomain(rootDomain: string): Promise<{ id: string; domain: string; cloudflare_zone_id: string | null }> {
+  const existing = await query<{ id: string; domain: string; cloudflare_zone_id: string | null }>(
+    'SELECT id, domain, cloudflare_zone_id FROM domains WHERE LOWER(domain) = $1',
+    [rootDomain.toLowerCase()]
+  );
+  if (existing.rows[0]) return existing.rows[0];
+
+  const created = await query<{ id: string; domain: string; cloudflare_zone_id: string | null }>(
+    `INSERT INTO domains (domain, registrar, cloudflare_zone_id, dns_provisioned, status, industry, activated_at)
+     VALUES ($1, $2, '', false, 'active', $3, NOW())
+     RETURNING id, domain, cloudflare_zone_id`,
+    [rootDomain.toLowerCase(), DEFAULT_REGISTRAR, DEFAULT_INDUSTRY]
+  );
+  return created.rows[0];
+}
+
+async function getOwnedPoolDomainIds(orgId: string): Promise<string[]> {
+  const owned = await query<{ id: string }>(
+    `SELECT d.id
+     FROM domains d
+     JOIN customer_domains cd ON LOWER(cd.domain) = LOWER(d.domain)
+     WHERE cd.organization_id = $1`,
+    [orgId]
+  );
+  return owned.rows.map((r) => r.id);
+}
+
+async function provisionDomainSubdomains(input: {
+  orgId: string;
+  domain: string;
+  count: number;
+  startIndex?: number;
+  namingScheme?: 'smtp' | 'mail' | 'outbound' | 'custom';
+  customPrefix?: string;
+}): Promise<{ domainId: string; created: number; skipped: number; errors: string[]; subdomains: string[] }> {
+  const poolDomain = await ensurePoolDomain(input.domain);
+  const result = await provisionSubdomainBatch({
+    domainId: poolDomain.id,
+    rootDomain: poolDomain.domain,
+    cloudflareZoneId: poolDomain.cloudflare_zone_id || undefined,
+    count: input.count,
+    startIndex: input.startIndex || 1,
+    namingScheme: input.namingScheme || 'smtp',
+    customPrefix: input.customPrefix,
+    createDNS: false,
+  });
+  return { domainId: poolDomain.id, created: result.created, skipped: result.skipped, errors: result.errors, subdomains: result.subdomains };
+}
+
+async function markSubdomainsDnsReady(rootDomain: string): Promise<void> {
+  const poolDomain = await ensurePoolDomain(rootDomain);
+  await query(
+    `UPDATE subdomains
+     SET dns_verified = true,
+         status = CASE WHEN status IN ('provisioning', 'inactive') THEN 'warming' ELSE status END,
+         warmup_started_at = COALESCE(warmup_started_at, NOW())
+     WHERE domain_id = $1`,
+    [poolDomain.id]
+  );
+}
 
 // ─── Dashboard ────────────────────────────────────────────
 
@@ -371,6 +447,7 @@ router.get('/domains/:id/setup', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Domain not found' });
     }
     const d = domainResult.rows[0];
+    await ensurePoolDomain(d.domain);
     if (!d.verified) {
       return res.json({
         redirect: `/portal/domains/${d.id}/verify`,
@@ -378,6 +455,19 @@ router.get('/domains/:id/setup', async (req: Request, res: Response) => {
       });
     }
     const identifierString = d.dkim_identifier_string || '';
+    const subdomainStats = await query<{
+      total: string; active: string; warming: string; inactive: string; dns_ready: string;
+    }>(
+      `SELECT COUNT(s.id)::text as total,
+              COUNT(*) FILTER (WHERE s.status = 'active')::text as active,
+              COUNT(*) FILTER (WHERE s.status = 'warming')::text as warming,
+              COUNT(*) FILTER (WHERE s.status = 'inactive')::text as inactive,
+              COUNT(*) FILTER (WHERE s.dns_verified = true)::text as dns_ready
+       FROM subdomains s
+       JOIN domains pd ON pd.id = s.domain_id
+       WHERE LOWER(pd.domain) = LOWER($1)`,
+      [d.domain]
+    );
     res.json({
       id: d.id,
       name: d.domain,
@@ -389,6 +479,13 @@ router.get('/domains/:id/setup', async (req: Request, res: Response) => {
       return_path_domain: returnPathDomain(d.domain),
       return_path_target: config.dns.returnPathDomain,
       mx_records: config.dns.mxRecords,
+      subdomain_pool: {
+        total: parseInt(subdomainStats.rows[0]?.total || '0'),
+        active: parseInt(subdomainStats.rows[0]?.active || '0'),
+        warming: parseInt(subdomainStats.rows[0]?.warming || '0'),
+        inactive: parseInt(subdomainStats.rows[0]?.inactive || '0'),
+        dns_ready: parseInt(subdomainStats.rows[0]?.dns_ready || '0'),
+      },
       checks: {
         spf: { status: d.spf_status, error: d.spf_error },
         dkim: { status: d.dkim_status, error: d.dkim_error },
@@ -456,6 +553,7 @@ router.post('/domains/:id/verify', async (req: Request, res: Response) => {
       const matches = await verifyWithDNS(d.domain, d.verification_token);
       if (matches) {
         await markVerified(d.id);
+        await markSubdomainsDnsReady(d.domain);
         return res.json({
           verified: true,
           redirect: `/portal/domains/${d.id}/setup`,
@@ -472,6 +570,7 @@ router.post('/domains/:id/verify', async (req: Request, res: Response) => {
     if (code) {
       if (d.verification_token === String(code).trim()) {
         await markVerified(d.id);
+        await markSubdomainsDnsReady(d.domain);
         return res.json({
           verified: true,
           redirect: `/portal/domains/${d.id}/setup`,
@@ -538,7 +637,8 @@ router.post('/domains/:id/check', async (req: Request, res: Response) => {
     );
 
     if (ok) {
-      return res.json({ dns_ok: true, redirect: '/portal/domains', flash: { notice: `Your DNS records for ${d.domain} look good!` } });
+      await markSubdomainsDnsReady(d.domain);
+      return res.json({ dns_ok: true, redirect: '/portal/domains', flash: { notice: `Your DNS records for ${d.domain} look good! Subdomains are ready for warmup.` } });
     }
     return res.json({
       dns_ok: false,
@@ -553,13 +653,13 @@ router.post('/domains/:id/check', async (req: Request, res: Response) => {
 
 router.post('/domains', async (req: Request, res: Response) => {
   try {
-    let { domain, verification_method } = req.body;
+    let { domain, verification_method, subdomain_count, naming_scheme, custom_prefix } = req.body;
     if (!domain) return res.status(400).json({ error: 'Domain name required' });
 
     const orgId = req.user!.orgId!;
     domain = String(domain).toLowerCase().trim();
-    if (!/^[a-z0-9\-.]*$/.test(domain)) {
-      return res.status(422).json({ error: 'Domain name can only contain lowercase letters, numbers, dashes and dots' });
+    if (!/^[a-z0-9][a-z0-9\-.]*[a-z0-9]$/.test(domain) || !domain.includes('.')) {
+      return res.status(422).json({ error: 'Enter a valid domain name using lowercase letters, numbers, dashes and dots' });
     }
 
     const existing = await query('SELECT id FROM customer_domains WHERE LOWER(domain) = $1 AND organization_id = $2', [domain, orgId]);
@@ -584,7 +684,21 @@ router.post('/domains', async (req: Request, res: Response) => {
       [orgId, domain, verificationToken, method, dkimIdentifierString, dkimIdentifier(dkimIdentifierString), encryptedPrivKey, pubKeyBase64]
     );
 
-    res.status(201).json({ id: result.rows[0].id, verified: false, verification_method: method });
+    const count = parseSubdomainCount(subdomain_count);
+    const pool = count > 0 ? await provisionDomainSubdomains({
+      orgId,
+      domain,
+      count,
+      namingScheme: normalizeNamingScheme(naming_scheme),
+      customPrefix: custom_prefix ? String(custom_prefix).toLowerCase().replace(/[^a-z0-9-]/g, '') : undefined,
+    }) : { domainId: '', created: 0, skipped: 0, errors: [], subdomains: [] };
+
+    res.status(201).json({
+      id: result.rows[0].id,
+      verified: false,
+      verification_method: method,
+      subdomain_pool: pool,
+    });
   } catch (err: any) {
     console.error('Add domain error:', err);
     res.status(500).json({ error: 'Failed to add domain' });
@@ -751,15 +865,85 @@ router.get('/subdomains', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT s.id, s.subdomain, d.domain as root_domain, s.sender_name,
               s.total_sent, s.emails_sent_today, s.daily_limit,
-              s.warmup_complete, s.status, s.bounce_rate,
+              s.warmup_complete, s.dns_verified, s.status, s.bounce_rate,
               s.engagement_score, s.created_at
-       FROM subdomains s JOIN domains d ON s.domain_id = d.id
-       ORDER BY d.domain, s.subdomain`
+       FROM subdomains s
+       JOIN domains d ON s.domain_id = d.id
+       JOIN customer_domains cd ON LOWER(cd.domain) = LOWER(d.domain) AND cd.organization_id = $1
+       ORDER BY d.domain, s.subdomain`,
+      [req.user!.orgId!]
     );
     res.json({ subdomains: result.rows });
   } catch (err) {
     console.error('Subdomains error:', err);
     res.status(500).json({ error: 'Failed to list subdomains' });
+  }
+});
+
+router.post('/subdomains', async (req: Request, res: Response) => {
+  try {
+    const { domain_id, count, start_index, naming_scheme, custom_prefix } = req.body;
+    if (!domain_id) return res.status(400).json({ error: 'domain_id required' });
+
+    const domainRow = await query<{ id: string; domain: string }>(
+      'SELECT id, domain FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      [domain_id, req.user!.orgId!]
+    );
+    if (domainRow.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
+
+    const result = await provisionDomainSubdomains({
+      orgId: req.user!.orgId!,
+      domain: domainRow.rows[0].domain,
+      count: parseSubdomainCount(count),
+      startIndex: start_index ? parseInt(start_index, 10) : 1,
+      namingScheme: normalizeNamingScheme(naming_scheme),
+      customPrefix: custom_prefix ? String(custom_prefix).toLowerCase().replace(/[^a-z0-9-]/g, '') : undefined,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('Provision subdomains error:', err);
+    res.status(500).json({ error: 'Failed to provision subdomains' });
+  }
+});
+
+router.post('/subdomains/activate', async (req: Request, res: Response) => {
+  try {
+    const { domain_id, ids } = req.body;
+    const ownedDomainIds = await getOwnedPoolDomainIds(req.user!.orgId!);
+    if (ownedDomainIds.length === 0) return res.status(404).json({ error: 'No domains available' });
+
+    let idsToActivate: string[] = [];
+    if (Array.isArray(ids) && ids.length > 0) {
+      const result = await query<{ id: string }>(
+        `SELECT id FROM subdomains WHERE id = ANY($1::uuid[]) AND domain_id = ANY($2::uuid[])`,
+        [ids, ownedDomainIds]
+      );
+      idsToActivate = result.rows.map((r) => r.id);
+    } else if (domain_id) {
+      const customerDomain = await query<{ domain: string }>(
+        'SELECT domain FROM customer_domains WHERE id = $1 AND organization_id = $2',
+        [domain_id, req.user!.orgId!]
+      );
+      if (customerDomain.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
+      const poolDomain = await ensurePoolDomain(customerDomain.rows[0].domain);
+      const result = await query<{ id: string }>(
+        "SELECT id FROM subdomains WHERE domain_id = $1 AND status IN ('inactive', 'warming', 'provisioning')",
+        [poolDomain.id]
+      );
+      idsToActivate = result.rows.map((r) => r.id);
+    } else {
+      const result = await query<{ id: string }>(
+        "SELECT id FROM subdomains WHERE domain_id = ANY($1::uuid[]) AND status IN ('inactive', 'warming', 'provisioning')",
+        [ownedDomainIds]
+      );
+      idsToActivate = result.rows.map((r) => r.id);
+    }
+
+    const result = await activateSubdomainBatch(idsToActivate);
+    res.json(result);
+  } catch (err) {
+    console.error('Activate subdomains error:', err);
+    res.status(500).json({ error: 'Failed to activate subdomains' });
   }
 });
 
@@ -770,7 +954,16 @@ router.put('/subdomains/:id/limit', async (req: Request, res: Response) => {
     if (isNaN(limit) || limit < 1 || limit > 1000) {
       return res.status(400).json({ error: 'daily_limit must be a number between 1 and 1000' });
     }
-    await query('UPDATE subdomains SET daily_limit = $1 WHERE id = $2', [limit, req.params.id]);
+    const result = await query(
+      `UPDATE subdomains s
+       SET daily_limit = $1
+       FROM domains d
+       JOIN customer_domains cd ON LOWER(cd.domain) = LOWER(d.domain) AND cd.organization_id = $3
+       WHERE s.id = $2 AND s.domain_id = d.id
+       RETURNING s.id`,
+      [limit, req.params.id, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Subdomain not found' });
     res.json({ success: true, daily_limit: limit });
   } catch (err) {
     console.error('Update limit error:', err);

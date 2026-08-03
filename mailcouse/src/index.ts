@@ -369,6 +369,7 @@ app.get('/portal/domains/:id/setup', async (req, res) => {
       returnPathDomain: data.return_path_domain || '',
       returnPathTarget: data.return_path_target || '',
       mxRecords: data.mx_records || [],
+      subdomainPool: data.subdomain_pool || { total: 0, active: 0, warming: 0, inactive: 0, dns_ready: 0 },
       checks: data.checks || { spf: { status: null, error: null }, dkim: { status: null, error: null }, mx: { status: null, error: null }, return_path: { status: null, error: null } },
       spfInclude: (data.spf_record || '').match(/include:([^\s]+)/)?.[1] || config.dns.spfInclude,
       title: 'DNS Setup', active: 'domains', email: userData.user?.email || '', token,
@@ -866,21 +867,23 @@ app.get('/portal/subdomains', async (req, res) => {
   if (!token) return res.redirect('/login');
   try {
     const base = `http://localhost:${config.api.port}`;
-    const [userRes, dataRes] = await Promise.all([
+    const [userRes, dataRes, domainRes] = await Promise.all([
       fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
       fetch(`${base}/api/portal/subdomains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
     ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { subdomains: [] };
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const search = (req.query.search as string || '').toLowerCase();
     const filtered = data.subdomains.filter((s: any) => !search || s.subdomain.includes(search) || s.root_domain.includes(search));
     const header = await fetchServerHeader(token);
-    res.render('subdomains', { layout: 'application', subdomains: filtered, title: 'Subdomains', activeNav: 'subdomains', email: userData.user?.email || '', token, search: req.query.search || '', ...header });
+    res.render('subdomains', { layout: 'application', subdomains: filtered, domains: domainData.domains || [], title: 'Subdomains', activeNav: 'subdomains', email: userData.user?.email || '', token, search: req.query.search || '', flash: getFlash(req), ...header });
   } catch { res.redirect('/login'); }
 });
 
-// ─── SMTP Relay Server ────────────────────────────────────
+// --- SMTP Relay Server ────────────────────────────────────
 import { createSmtpRelay } from './smtp-relay';
 const smtpServers: any[] = [];
 

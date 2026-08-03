@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc && cp -r src/views/. dist/views/ && cp -r src/public/. dist/public/ && cp src/db/schema.sql dist/db/schema.sql",
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "node scripts/copy-assets.js",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "ts-node --files src/index.ts",
     "test": "jest --coverage",
     "test:unit": "jest --testPathPattern=__tests__/(validators|deduplicator|importer)\\.test\\.ts",
     "test:integration": "jest --testPathPattern=__tests__/integration\\.test\\.ts",
