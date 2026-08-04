@@ -1,2 +1,58 @@
-<!-- This is the raw (non-layout) application page used for AJAX-loaded content -->
-<%- body %>
+<!DOCTYPE html>
+<html class="main">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= typeof pageTitle !== 'undefined' && pageTitle ? pageTitle : 'Postal' %></title>
+  <link rel="stylesheet" href="/css/postal.css">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700;900&family=Droid+Sans+Mono&display=swap" rel="stylesheet">
+  <link rel="shortcut icon" href="/favicon.png">
+  <meta name="turbolinks-cache-control" content="no-cache">
+</head>
+<body>
+  <% if (typeof flash !== 'undefined' && flash) { %>
+    <div class="flashMessage<%= flash.type === 'notice' ? ' flashMessage--notice' : '' %>" onclick="this.remove()"><%= flash.message %></div>
+  <% } %>
+  <header class="siteHeader" data-turbolinks-permanent="true">
+    <div class="siteHeader__inside">
+      <p class="siteHeader__logo"><a href="/portal/dashboard">Postal</a></p>
+      <p class="siteHeader__version">The open source e-mail platform</p>
+      <ul class="siteHeader__nav">
+        <% if (typeof orgName !== 'undefined' && orgName) { %>
+          <li class="siteHeader__navItem"></li>
+          <li class="siteHeader__navItem siteHeader__navItem--organization">
+            <span class="siteHeader__navLinkWithMenu"><%= orgName %></span>
+            <ul class="siteHeader__subMenu">
+              <li class="siteHeader__subMenuItem siteHeader__subMenuItem--header"><a href="/portal/dashboard"><%= orgName %></a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/dashboard" class="siteHeader__subMenuLink">Mail servers</a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/domains" class="siteHeader__subMenuLink">Domains</a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/settings" class="siteHeader__subMenuLink">Organization Settings</a></li>
+              <li class="siteHeader__subMenuItem"><a href="/portal/settings" class="siteHeader__subMenuLink">Create new organization</a></li>
+            </ul>
+          </li>
+        <% } %>
+        <li class="siteHeader__navItem siteHeader__navItem--user"><%= typeof userName !== 'undefined' ? userName : '' %></li>
+        <li class="siteHeader__navItem"><a href="/portal/settings" class="sideHeader__navItemLink">My Settings</a></li>
+        <li class="siteHeader__navItem"><a href="/logout" class="sideHeader__navItemLink">Logout</a></li>
+      </ul>
+    </div>
+  </header>
+  <div class="siteContent">
+    <% if (typeof sidebar !== 'undefined' && sidebar) { %>
+      <nav class="sidebar"><%- sidebar %></nav>
+    <% } %>
+    <section class="siteContent__main">
+      <%- body %>
+      <footer class="siteContent__footer">
+        <ul class="footer__links">
+          <li class="footer__name">Powered by <a href="https://postalserver.io" target="_blank">Postal</a></li>
+          <li><a href="https://docs.postalserver.io" target="_blank">Documentation</a></li>
+          <li><a href="https://discussions.postalserver.io" target="_blank">Ask for help</a></li>
+        </ul>
+      </footer>
+    </section>
+  </div>
+  <script src="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.js"></script>
+  <script src="/js/postal.js"></script>
+</body>
+</html>

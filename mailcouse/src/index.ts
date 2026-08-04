@@ -335,7 +335,7 @@ app.get('/portal/dashboard', async (req, res) => {
       labels.push(d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
     }
     res.render('dashboard', {
-      layout: 'application', ...data, ...header, sidebar, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token,
+      layout: 'layout', ...data, ...header, sidebar, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token,
       graphLabels: labels,
       graphSeries: [outRaw.slice().reverse(), inRaw.slice().reverse()],
       graphData: labels.map((label, i) => ({ label, out: outRaw[outRaw.length - 1 - i], in: inRaw[inRaw.length - 1 - i] })),
@@ -358,7 +358,7 @@ app.get('/portal/domains', async (req, res) => {
     const data = dataRes.ok ? await dataRes.json() : { domains: [] };
     const flash = getFlash(req);
     const header = await fetchServerHeader(token);
-    res.render('domains', { layout: 'application', ...data, ...header, flash, title: 'Domains', active: 'domains', email: userData.user?.email || '', token });
+    res.render('domains', { layout: 'layout', ...data, ...header, flash, title: 'Domains', active: 'domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -370,7 +370,7 @@ app.get('/portal/domains/add', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const header = await fetchServerHeader(token);
-    res.render('add-domain', { layout: 'application', ...header, error: req.query.error || null, title: 'Add Domain', active: 'domains', email: userData.user?.email || '', token });
+    res.render('add-domain', { layout: 'layout', ...header, error: req.query.error || null, title: 'Add Domain', active: 'domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -392,7 +392,7 @@ app.get('/portal/domains/:id/setup', async (req, res) => {
     }
     const header = await fetchServerHeader(token);
     res.render('domain-setup', {
-      layout: 'application',
+      layout: 'layout',
       ...header,
       flash: getFlash(req),
       id: data.id,
@@ -430,7 +430,7 @@ app.get('/portal/domains/:id/verify', async (req, res) => {
     }
     const header = await fetchServerHeader(token);
     res.render('domain-verify', {
-      layout: 'application',
+      layout: 'layout',
       ...header,
       domainId: data.id || req.params.id,
       domainName: data.name || '',
@@ -456,7 +456,7 @@ app.get('/portal/credentials', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { credentials: [] };
     const header = await fetchServerHeader(token);
-    res.render('credentials', { layout: 'application', ...header, ...data, title: 'Credentials', active: 'credentials', email: userData.user?.email || '', token });
+    res.render('credentials', { layout: 'layout', ...header, ...data, title: 'Credentials', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -473,7 +473,7 @@ app.get('/portal/credentials/add', async (req, res) => {
     const userData = await userRes.json();
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const header = await fetchServerHeader(token);
-    res.render('add-credential', { layout: 'application', ...header, domains: domainData.domains || [], title: 'Add Credential', active: 'credentials', email: userData.user?.email || '', token });
+    res.render('add-credential', { layout: 'layout', ...header, domains: domainData.domains || [], title: 'Add Credential', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -491,7 +491,7 @@ app.get('/portal/credentials/:id/edit', async (req, res) => {
     const userData = await userRes.json();
     const credential = await credRes.json();
     const header = await fetchServerHeader(token);
-    res.render('add-credential', { layout: 'application', ...header, credential, title: 'Edit Credential', active: 'credentials', email: userData.user?.email || '', token });
+    res.render('add-credential', { layout: 'layout', ...header, credential, title: 'Edit Credential', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -515,7 +515,7 @@ app.get('/portal/messages/outgoing', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
     const header = await fetchServerHeader(token);
-    res.render('messages', { layout: 'application', ...header, ...data, title: 'Outgoing Messages', scope: 'outgoing', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/outgoing' });
+    res.render('messages', { layout: 'layout', ...header, ...data, title: 'Outgoing Messages', scope: 'outgoing', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/outgoing' });
   } catch { res.redirect('/login'); }
 });
 
@@ -533,7 +533,7 @@ app.get('/portal/messages/incoming', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
     const header = await fetchServerHeader(token);
-    res.render('messages', { layout: 'application', ...header, ...data, title: 'Incoming Messages', scope: 'incoming', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/incoming' });
+    res.render('messages', { layout: 'layout', ...header, ...data, title: 'Incoming Messages', scope: 'incoming', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/incoming' });
   } catch { res.redirect('/login'); }
 });
 
@@ -551,7 +551,7 @@ app.get('/portal/messages/held', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
     const header = await fetchServerHeader(token);
-    res.render('messages', { layout: 'application', ...header, ...data, title: 'Held Messages', scope: 'held', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/held' });
+    res.render('messages', { layout: 'layout', ...header, ...data, title: 'Held Messages', scope: 'held', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/held' });
   } catch { res.redirect('/login'); }
 });
 
@@ -569,7 +569,7 @@ app.get('/portal/messages/queue', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { messages: [], pagination: { page: 1, totalPages: 1 } };
     const header = await fetchServerHeader(token);
-    res.render('messages', { layout: 'application', ...header, ...data, title: 'Message Queue', scope: 'queue', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/queue' });
+    res.render('messages', { layout: 'layout', ...header, ...data, title: 'Message Queue', scope: 'queue', active: 'messages', email: userData.user?.email || '', token, search: req.query.search || '', status: req.query.status || '', currentPath: '/portal/messages/queue' });
   } catch { res.redirect('/login'); }
 });
 
@@ -586,7 +586,7 @@ app.get('/portal/messages/suppressions', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { suppressions: [] };
     const header = await fetchServerHeader(token);
-    res.render('messages', { layout: 'application', ...header, ...data, title: 'Suppressions', scope: 'suppressions', active: 'messages', email: userData.user?.email || '', token, search: '', status: '' });
+    res.render('messages', { layout: 'layout', ...header, ...data, title: 'Suppressions', scope: 'suppressions', active: 'messages', email: userData.user?.email || '', token, search: '', status: '' });
   } catch { res.redirect('/login'); }
 });
 
@@ -652,7 +652,7 @@ app.get('/portal/messages/:id', async (req, res) => {
     if (!msgRes.ok) return res.redirect('/portal/messages');
     const data = await msgRes.json();
     const header = await fetchServerHeader(token);
-    res.render('message-detail', { layout: 'application', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: 'properties', humanSize, parseHeaders, email: userData.user?.email || '', token });
+    res.render('message-detail', { layout: 'layout', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: 'properties', humanSize, parseHeaders, email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -672,7 +672,7 @@ app.get('/portal/messages/:id/:tab', async (req, res) => {
     if (!msgRes.ok) return res.redirect('/portal/messages');
     const data = await msgRes.json();
     const header = await fetchServerHeader(token);
-    res.render('message-detail', { layout: 'application', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: req.params.tab, humanSize, parseHeaders, email: userData.user?.email || '', token });
+    res.render('message-detail', { layout: 'layout', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: req.params.tab, humanSize, parseHeaders, email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -690,7 +690,7 @@ app.get('/portal/webhooks/history', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { requests: [], pagination: { page: 1, totalPages: 1 } };
     const header = await fetchServerHeader(token);
-    res.render('webhook-history', { layout: 'application', ...header, ...data, title: 'Webhook History', active: 'webhooks', email: userData.user?.email || '', token });
+    res.render('webhook-history', { layout: 'layout', ...header, ...data, title: 'Webhook History', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -708,7 +708,7 @@ app.get('/portal/webhooks/history/:uuid', async (req, res) => {
     if (!dataRes.ok) return res.redirect('/portal/webhooks/history');
     const data = await dataRes.json();
     const header = await fetchServerHeader(token);
-    res.render('webhook-request', { layout: 'application', ...header, request: data.request, title: 'Webhook Request', active: 'webhooks', email: userData.user?.email || '', token });
+    res.render('webhook-request', { layout: 'layout', ...header, request: data.request, title: 'Webhook Request', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -725,7 +725,7 @@ app.get('/portal/settings/limits', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { server: {} };
     const header = await fetchServerHeader(token);
-    res.render('settings-limits', { layout: 'application', ...header, server: data.server, title: 'Send Limit', active: 'settings', email: userData.user?.email || '', token });
+    res.render('settings-limits', { layout: 'layout', ...header, server: data.server, title: 'Send Limit', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -742,7 +742,7 @@ app.get('/portal/settings/retention', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { server: {} };
     const header = await fetchServerHeader(token);
-    res.render('settings-retention', { layout: 'application', ...header, server: data.server, title: 'Message Retention', active: 'settings', humanSize, email: userData.user?.email || '', token });
+    res.render('settings-retention', { layout: 'layout', ...header, server: data.server, title: 'Message Retention', active: 'settings', humanSize, email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -761,7 +761,7 @@ app.get('/portal/settings/spam', async (req, res) => {
     const server = data.server || {};
     const header = await fetchServerHeader(token);
     res.render('settings-spam', {
-      layout: 'application', ...header,
+      layout: 'layout', ...header,
       server,
       spamThreshold: server.spam_threshold ?? 5,
       spamFailureThreshold: server.spam_failure_threshold ?? 20,
@@ -779,7 +779,7 @@ app.get('/portal/settings/delete', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const header = await fetchServerHeader(token);
-    res.render('settings-delete', { layout: 'application', ...header, title: 'Delete Server', active: 'settings', email: userData.user?.email || '', token });
+    res.render('settings-delete', { layout: 'layout', ...header, title: 'Delete Server', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -796,7 +796,7 @@ app.get('/portal/settings/advanced', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { server: {} };
     const header = await fetchServerHeader(token);
-    res.render('settings-advanced', { layout: 'application', ...header, server: data.server, title: 'Advanced Settings', active: 'settings', email: userData.user?.email || '', token });
+    res.render('settings-advanced', { layout: 'layout', ...header, server: data.server, title: 'Advanced Settings', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -814,7 +814,7 @@ app.get('/portal/help/outgoing', async (req, res) => {
     const settingsData = settingsRes.ok ? await settingsRes.json() : { server: null, credentials: [] };
     const header = await fetchServerHeader(token);
     res.render('help-outgoing', {
-      layout: 'application', ...header, title: 'Help — Sending E-Mail', active: 'help',
+      layout: 'layout', ...header, title: 'Help — Sending E-Mail', active: 'help',
       email: userData.user?.email || '', token,
       smtpHost: config.dns.heloHostname || config.api.host,
       smtpPort: config.platform.smtpPort,
@@ -837,7 +837,7 @@ app.get('/portal/help/incoming', async (req, res) => {
     const userData = await userRes.json();
     const header = await fetchServerHeader(token);
     res.render('help-incoming', {
-      layout: 'application', ...header, title: 'Help — Receiving E-Mail', active: 'help',
+      layout: 'layout', ...header, title: 'Help — Receiving E-Mail', active: 'help',
       email: userData.user?.email || '', token,
       mxRecords: config.dns.mxRecords,
     });
@@ -861,7 +861,7 @@ app.get('/portal/send', async (req, res) => {
     const firstDomain = domainData.domains?.find((d: any) => d.verified);
     const header = await fetchServerHeader(token);
     res.render('send-message', {
-      layout: 'application',
+      layout: 'layout',
       ...header,
       title: 'Send Message',
       active: 'messages',
@@ -893,7 +893,7 @@ app.get('/portal/settings', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { organization: {}, members: [] };
     const header = await fetchServerHeader(token);
-    res.render('settings', { layout: 'application', ...header, org: data.organization, members: data.members, title: 'Settings', active: 'settings', email: userData.user?.email || '', token });
+    res.render('settings', { layout: 'layout', ...header, org: data.organization, members: data.members, title: 'Settings', active: 'settings', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -914,7 +914,7 @@ app.get('/portal/subdomains', async (req, res) => {
     const search = (req.query.search as string || '').toLowerCase();
     const filtered = data.subdomains.filter((s: any) => !search || s.subdomain.includes(search) || s.root_domain.includes(search));
     const header = await fetchServerHeader(token);
-    res.render('subdomains', { layout: 'application', subdomains: filtered, domains: domainData.domains || [], title: 'Subdomains', activeNav: 'subdomains', email: userData.user?.email || '', token, search: req.query.search || '', flash: getFlash(req), ...header });
+    res.render('subdomains', { layout: 'layout', subdomains: filtered, domains: domainData.domains || [], title: 'Subdomains', activeNav: 'subdomains', email: userData.user?.email || '', token, search: req.query.search || '', flash: getFlash(req), ...header });
   } catch { res.redirect('/login'); }
 });
 
@@ -935,7 +935,7 @@ app.get('/portal/routes', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { routes: [] };
     const header = await fetchServerHeader(token);
-    res.render('routes', { layout: 'application', ...data, ...header, endpointCounts: data.endpoint_counts || { total: 0, http: 0, smtp: 0, address: 0 }, title: 'Routes', active: 'routes', email: userData.user?.email || '', token });
+    res.render('routes', { layout: 'layout', ...data, ...header, endpointCounts: data.endpoint_counts || { total: 0, http: 0, smtp: 0, address: 0 }, title: 'Routes', active: 'routes', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -959,7 +959,7 @@ app.get('/portal/routes/add', async (req, res) => {
     const userData = await userRes.json();
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const header = await fetchServerHeader(token);
-    res.render('add-route', { layout: 'application', ...header, domains: domainData.domains || [], endpoint: (req.query.endpoint as string) || '', title: 'Add Route', active: 'routes', email: userData.user?.email || '', token });
+    res.render('add-route', { layout: 'layout', ...header, domains: domainData.domains || [], endpoint: (req.query.endpoint as string) || '', title: 'Add Route', active: 'routes', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -980,7 +980,7 @@ app.get('/portal/routes/:id/edit', async (req, res) => {
     const route = (routeData.routes || []).find((r: any) => r.id === req.params.id);
     if (!route) return res.redirect('/portal/routes');
     const header = await fetchServerHeader(token);
-    res.render('add-route', { layout: 'application', ...header, domains: domainData.domains || [], route, endpoint: (route.endpoint_type || '').toLowerCase(), title: 'Edit Route', active: 'routes', email: userData.user?.email || '', token });
+    res.render('add-route', { layout: 'layout', ...header, domains: domainData.domains || [], route, endpoint: (route.endpoint_type || '').toLowerCase(), title: 'Edit Route', active: 'routes', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -997,7 +997,7 @@ app.get('/portal/webhooks', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { webhooks: [] };
     const header = await fetchServerHeader(token);
-    res.render('webhooks', { layout: 'application', ...header, ...data, title: 'Webhooks', active: 'webhooks', email: userData.user?.email || '', token });
+    res.render('webhooks', { layout: 'layout', ...header, ...data, title: 'Webhooks', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -1009,7 +1009,7 @@ app.get('/portal/webhooks/add', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const header = await fetchServerHeader(token);
-    res.render('add-webhook', { layout: 'application', ...header, title: 'Add Webhook', active: 'webhooks', email: userData.user?.email || '', token });
+    res.render('add-webhook', { layout: 'layout', ...header, title: 'Add Webhook', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -1027,7 +1027,7 @@ app.get('/portal/webhooks/:id/edit', async (req, res) => {
     const userData = await userRes.json();
     const webhook = await webhookRes.json();
     const header = await fetchServerHeader(token);
-    res.render('add-webhook', { layout: 'application', ...header, webhook, title: 'Edit Webhook', active: 'webhooks', email: userData.user?.email || '', token });
+    res.render('add-webhook', { layout: 'layout', ...header, webhook, title: 'Edit Webhook', active: 'webhooks', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -1044,7 +1044,7 @@ app.get('/portal/track-domains', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { trackDomains: [] };
     const header = await fetchServerHeader(token);
-    res.render('track-domains', { layout: 'application', ...header, ...data, title: 'Tracking Domains', active: 'track-domains', email: userData.user?.email || '', token });
+    res.render('track-domains', { layout: 'layout', ...header, ...data, title: 'Tracking Domains', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -1061,7 +1061,7 @@ app.get('/portal/track-domains/add', async (req, res) => {
     const userData = await userRes.json();
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const header = await fetchServerHeader(token);
-    res.render('add-track-domain', { layout: 'application', ...header, domains: domainData.domains || [], title: 'Add Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
+    res.render('add-track-domain', { layout: 'layout', ...header, domains: domainData.domains || [], title: 'Add Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -1081,7 +1081,7 @@ app.get('/portal/track-domains/:id/edit', async (req, res) => {
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const trackDomain = await tdRes.json();
     const header = await fetchServerHeader(token);
-    res.render('add-track-domain', { layout: 'application', ...header, domains: domainData.domains || [], trackDomain, title: 'Edit Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
+    res.render('add-track-domain', { layout: 'layout', ...header, domains: domainData.domains || [], trackDomain, title: 'Edit Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -1098,7 +1098,7 @@ app.get('/portal/pool', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { pool: [] };
     const header = await fetchServerHeader(token);
-    res.render('pool', { layout: 'application', ...data, title: 'Subdomain Pool', activeNav: 'pool', email: userData.user?.email || '', token, ...header });
+    res.render('pool', { layout: 'layout', ...data, title: 'Subdomain Pool', activeNav: 'pool', email: userData.user?.email || '', token, ...header });
   } catch { res.redirect('/login'); }
 });
 
@@ -1114,7 +1114,7 @@ app.get('/portal/servers', async (req, res) => {
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { servers: [] };
-    res.render('servers', { layout: 'application', servers: data.servers, title: 'Servers', active: 'servers', email: userData.user?.email || '', token });
+    res.render('servers', { layout: 'layout', servers: data.servers, title: 'Servers', active: 'servers', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
