@@ -41,7 +41,14 @@ app.set('views', path.join(__dirname, 'views'));
 app.set('layout extractScripts', true);
 app.use(layouts);
 app.use(express.static(path.join(__dirname, 'public')));
-
+app.use((req, res, next) => {
+  if (req.path.startsWith('/portal') || req.path.startsWith('/api/portal')) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+  next();
+});
 // Global EJS helpers
 app.locals.timeAgo = function(date: Date | string | null | undefined): string {
   if (!date) return 'Never';
