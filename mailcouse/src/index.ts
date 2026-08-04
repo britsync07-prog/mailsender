@@ -71,6 +71,36 @@ app.use((req, res, next) => {
   next();
 });
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderServerSidebar(header: Record<string, unknown>): string {
+  const mode = escapeHtml(header.serverMode || 'live');
+  const name = escapeHtml(header.serverName || 'Mail Server');
+  const rate = escapeHtml(header.messageRate || '0.00');
+  return `
+    <div class="js-searchable">
+      <form class="sidebar__search js-searchable__input">
+        <input type="text" class="sidebar__searchInput js-focus-on-s" placeholder="Filter servers...">
+      </form>
+      <ul class="sidebarServerList js-searchable__list">
+        <li class="sidebarServerList__item js-searchable__item" data-url="/portal/dashboard" data-value="${name.toLowerCase().replace(/[^a-z0-9]/g, '')}">
+          <a href="/portal/dashboard" class="sidebarServerList__link is-active">
+            <p class="sidebarServerList__mode label label--serverStatus-${mode}">${mode}</p>
+            <p class="sidebarServerList__title">${name}</p>
+            <p class="sidebarServerList__quantity">${rate} messages/minute</p>
+          </a>
+        </li>
+      </ul>
+      <p class="sidebar__new"><a href="/portal/settings">Build a new mail server</a></p>
+    </div>`;
+}
 function getFlash(req: express.Request): { type: string; message: string } | null {
   const notice = req.query.notice as string | undefined;
   const alert = req.query.alert as string | undefined;
@@ -292,6 +322,7 @@ app.get('/portal/dashboard', async (req, res) => {
     const userData = await userRes.json();
     const data = dataRes.ok ? await dataRes.json() : { stats: { domains: 0, credentials: 0, messagesSent: 0, held: 0, queued: 0, bounces: 0, todaySent: 0, sendLimit: null }, recentMessages: [], server: { mode: 'live', suspended: false } };
     const header = await fetchServerHeader(token);
+    const sidebar = renderServerSidebar(header);
     const outRaw = (data.stats?.graphOutgoing || '').split(',').map((n: string) => parseInt(n || '0'));
     const inRaw = (data.stats?.graphIncoming || '').split(',').map((n: string) => parseInt(n || '0'));
     const labels: string[] = [];
@@ -300,7 +331,7 @@ app.get('/portal/dashboard', async (req, res) => {
       labels.push(d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
     }
     res.render('dashboard', {
-      layout: 'application', ...data, ...header, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token,
+      layout: 'application', ...data, ...header, sidebar, title: 'Dashboard', active: 'dashboard', email: userData.user?.email || '', token,
       graphLabels: labels,
       graphSeries: [outRaw.slice().reverse(), inRaw.slice().reverse()],
       graphData: labels.map((label, i) => ({ label, out: outRaw[outRaw.length - 1 - i], in: inRaw[inRaw.length - 1 - i] })),

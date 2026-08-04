@@ -18,9 +18,9 @@
   </div>
   <div class="serverHeader__stats" data-turbolinks-permanent="true" id="serverStats-main">
     <ul class="serverHeader__statsList">
-      <li class="serverHeader__stat-held"><a href="/portal/messages/held" class="js-held-count"><%= heldMessages %> message<%= heldMessages !== 1 ? 's' : '' %> held</a></li>
-      <li class="serverHeader__stat-queue"><a href="/portal/messages/queue" class="js-queue-size"><%= queuedMessages %> queued message<%= queuedMessages !== 1 ? 's' : '' %></a></li>
-      <li class="serverHeader__stat-bounces"><a href="/portal/messages/outgoing?query=status:hardfail+status:bounced" class="js-bounce-rate"><%= bounceRate %>% bounce rate</a></li>
+      <li class="serverHeader__stat-held"><a href="/portal/messages?scope=held" class="js-held-count"><%= heldMessages %> message<%= heldMessages !== 1 ? 's' : '' %> held</a></li>
+      <li class="serverHeader__stat-queue"><a href="/portal/messages?scope=queued" class="js-queue-size"><%= queuedMessages %> queued message<%= queuedMessages !== 1 ? 's' : '' %></a></li>
+      <li class="serverHeader__stat-bounces"><a href="/portal/messages?query=status:hardfail+status:bounced" class="js-bounce-rate"><%= bounceRate %>% bounce rate</a></li>
       <li class="serverHeader__stat-size"><a href="/portal/settings/retention" class="js-disk-size"><%= diskUsed %> used</a></li>
     </ul>
   </div>
