@@ -16,6 +16,7 @@ import {
   dkimIdentifier,
   returnPathDomain,
   dnsVerificationString,
+  resolveTxt,
   checkDomainDNS,
   findVerifiedDomainForAddress,
 } from './domain-logic';
@@ -718,14 +719,8 @@ router.delete('/domains/:id', async (req: Request, res: Response) => {
 });
 
 async function verifyWithDNS(name: string, verificationToken: string): Promise<boolean> {
-  const { promises } = require('dns');
-  try {
-    const records = await promises.resolveTxt(name);
-    const strings = records.map((r: string[]) => r.join(''));
-    return strings.includes(dnsVerificationString(verificationToken));
-  } catch {
-    return false;
-  }
+  const records = await resolveTxt(name);
+  return records.includes(dnsVerificationString(verificationToken));
 }
 
 async function markVerified(id: string): Promise<void> {

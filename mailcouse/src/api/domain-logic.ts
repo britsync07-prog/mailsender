@@ -92,34 +92,86 @@ export function dnsOk(checks: DomainDNSChecks): boolean {
   );
 }
 
-async function resolveTxt(name: string): Promise<string[]> {
+function dnsResolverServers(): string[] {
+  return (process.env.DNS_RESOLVERS || '1.1.1.1,8.8.8.8,9.9.9.9')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+async function resolveTxtFromServer(name: string, server?: string): Promise<string[]> {
   try {
-    const records = await dns.promises.resolveTxt(name);
+    const resolver = server ? new dns.promises.Resolver() : dns.promises;
+    if (server && 'setServers' in resolver) resolver.setServers([server]);
+    const records = await resolver.resolveTxt(name);
     return records.map((r) => r.join(''));
   } catch {
     return [];
   }
 }
 
-async function resolveMx(name: string): Promise<string[]> {
+async function resolveMxFromServer(name: string, server?: string): Promise<string[]> {
   try {
-    const records = await dns.promises.resolveMx(name);
+    const resolver = server ? new dns.promises.Resolver() : dns.promises;
+    if (server && 'setServers' in resolver) resolver.setServers([server]);
+    const records = await resolver.resolveMx(name);
     return records.map((r) => r.exchange);
   } catch {
     return [];
   }
 }
 
-async function resolveCname(name: string): Promise<string[]> {
+async function resolveCnameFromServer(name: string, server?: string): Promise<string[]> {
   try {
-    return await dns.promises.resolveCname(name);
+    const resolver = server ? new dns.promises.Resolver() : dns.promises;
+    if (server && 'setServers' in resolver) resolver.setServers([server]);
+    return await resolver.resolveCname(name);
   } catch {
     return [];
   }
 }
 
-// ─── SPF ──────────────────────────────────────────────────
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
 
+export async function resolveTxt(name: string): Promise<string[]> {
+  const all: string[] = [];
+  all.push(...await resolveTxtFromServer(name));
+  for (const server of dnsResolverServers()) {
+    all.push(...await resolveTxtFromServer(name, server));
+  }
+  return unique(all);
+}
+
+async function resolveTxtSources(name: string): Promise<string[][]> {
+  const sources: string[][] = [];
+  const system = await resolveTxtFromServer(name);
+  if (system.length > 0) sources.push(system);
+  for (const server of dnsResolverServers()) {
+    const records = await resolveTxtFromServer(name, server);
+    if (records.length > 0) sources.push(records);
+  }
+  return sources;
+}
+
+async function resolveMx(name: string): Promise<string[]> {
+  const all: string[] = [];
+  all.push(...await resolveMxFromServer(name));
+  for (const server of dnsResolverServers()) {
+    all.push(...await resolveMxFromServer(name, server));
+  }
+  return unique(all);
+}
+
+async function resolveCname(name: string): Promise<string[]> {
+  const all: string[] = [];
+  all.push(...await resolveCnameFromServer(name));
+  for (const server of dnsResolverServers()) {
+    all.push(...await resolveCnameFromServer(name, server));
+  }
+  return unique(all);
+}
 export async function checkSpfRecord(name: string): Promise<DNSStatus> {
   const result = await resolveTxt(name);
   const spfRecords = result.filter((r) => /^v=spf1/.test(r));
@@ -137,25 +189,27 @@ export async function checkSpfRecord(name: string): Promise<DNSStatus> {
 
 export async function checkDkimRecord(name: string, identifierString: string, expectedRecord: string): Promise<DNSStatus> {
   const domain = `${dkimRecordName(identifierString)}.${name}`;
-  const records = await resolveTxt(domain);
-  if (records.length === 0) {
+  const sources = await resolveTxtSources(domain);
+  if (sources.length === 0) {
     return { status: 'Missing', error: `No TXT records were returned for ${domain}` };
   }
-  if (records.length > 1) {
-    return { status: 'Invalid', error: `There are ${records.length} records for at ${domain}. There should only be one.` };
+
+  for (const records of sources) {
+    const sanitised = records.map((r) => r.trim().endsWith(';') ? r.trim() : `${r.trim()};`);
+    if (sanitised.length === 1 && sanitised[0] === expectedRecord) {
+      return { status: 'OK', error: null };
+    }
   }
-  const sanitised = records[0].trim().endsWith(';') ? records[0].trim() : `${records[0].trim()};`;
-  if (sanitised !== expectedRecord) {
-    return {
-      status: 'Invalid',
-      error: `The DKIM record at ${domain} does not match the record we have provided. Please check it has been copied correctly.`,
-    };
+
+  const merged = unique(sources.flat());
+  if (merged.length > 1) {
+    return { status: 'Invalid', error: `There are ${merged.length} records for at ${domain}. There should only be one.` };
   }
-  return { status: 'OK', error: null };
+  return {
+    status: 'Invalid',
+    error: `The DKIM record at ${domain} does not match the record we have provided. Please check it has been copied correctly.`,
+  };
 }
-
-// ─── MX ───────────────────────────────────────────────────
-
 export async function checkMxRecords(name: string): Promise<DNSStatus> {
   const records = await resolveMx(name);
   if (records.length === 0) {
