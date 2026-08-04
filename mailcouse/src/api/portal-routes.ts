@@ -1419,7 +1419,10 @@ router.post('/webhooks/:id/toggle', async (req: Request, res: Response) => {
       [req.params.id, req.user!.orgId!]
     );
     if (wh.rows.length === 0) return res.status(404).json({ error: 'Webhook not found' });
-    await query('UPDATE webhooks SET enabled = $1 WHERE id = $2', [!wh.rows[0].enabled, req.params.id]);
+    await query(
+      'UPDATE webhooks SET enabled = $1 WHERE id = $2 AND organization_id = $3',
+      [!wh.rows[0].enabled, req.params.id, req.user!.orgId!]
+    );
     res.json({ enabled: !wh.rows[0].enabled });
   } catch {
     res.status(500).json({ error: 'Failed to toggle webhook' });
@@ -1498,15 +1501,14 @@ router.post('/track-domains/:id/toggle-ssl', async (req: Request, res: Response)
     if (result.rows.length === 0) return res.status(404).json({ error: 'Track domain not found' });
     const current = result.rows[0].ssl_enabled;
     await query(
-      'UPDATE track_domains SET ssl_enabled = $1 WHERE id = $2',
-      [!current, req.params.id]
+      'UPDATE track_domains SET ssl_enabled = $1 WHERE id = $2 AND organization_id = $3',
+      [!current, req.params.id, req.user!.orgId!]
     );
     res.json({ ssl_enabled: !current });
   } catch {
     res.status(500).json({ error: 'Failed to toggle SSL' });
   }
 });
-
 router.post('/track-domains/:id/check', async (req: Request, res: Response) => {
   try {
     const result = await query<{ id: string; domain: string }>(
@@ -1529,15 +1531,14 @@ router.post('/track-domains/:id/check', async (req: Request, res: Response) => {
       dnsError = err.message;
     }
     await query(
-      'UPDATE track_domains SET dns_verified = $1, dns_status = $2, dns_error = $3 WHERE id = $4',
-      [dnsStatus === 'OK', dnsStatus, dnsError, req.params.id]
+      'UPDATE track_domains SET dns_verified = $1, dns_status = $2, dns_error = $3 WHERE id = $4 AND organization_id = $5',
+      [dnsStatus === 'OK', dnsStatus, dnsError, req.params.id, req.user!.orgId!]
     );
     res.json({ dns_status: dnsStatus, message: dnsStatus === 'OK' ? 'DNS looks good!' : 'DNS check failed: ' + dnsError });
   } catch {
     res.status(500).json({ error: 'Failed to check DNS' });
   }
 });
-
 router.delete('/track-domains/:id', async (req: Request, res: Response) => {
   try {
     await query('DELETE FROM track_domains WHERE id = $1 AND organization_id = $2', [req.params.id, req.user!.orgId!]);
@@ -1574,6 +1575,7 @@ router.get('/pool', async (req: Request, res: Response) => {
               spt.last_used_at, spt.total_assigned
        FROM subdomains s
        JOIN domains d ON d.id = s.domain_id
+       JOIN customer_domains cd ON LOWER(cd.domain) = LOWER(d.domain) AND cd.organization_id = $1
        LEFT JOIN subdomain_pool_tracking spt ON spt.subdomain_id = s.id AND spt.organization_id = $1
        ORDER BY spt.last_used_at DESC NULLS LAST`,
       [req.user!.orgId!]

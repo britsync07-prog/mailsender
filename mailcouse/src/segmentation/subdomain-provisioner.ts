@@ -173,34 +173,38 @@ export async function getDomainSubdomainStats(domainId?: string): Promise<{
   warming: number;
   activeByDomain: { domain: string; total: number; active: number }[];
 }> {
-  let whereClause = '';
+  let domainWhere = '';
   const params: any[] = [];
   if (domainId) {
-    whereClause = 'WHERE s.domain_id = $1';
+    domainWhere = 'WHERE s.domain_id = $1';
     params.push(domainId);
   }
+  const withStatus = (statusClause: string): string =>
+    domainWhere ? `${domainWhere} AND ${statusClause}` : `WHERE ${statusClause}`;
 
   const totalResult = await query<{ cnt: string }>(
-    `SELECT COUNT(*) as cnt FROM subdomains s ${whereClause}`, params
+    `SELECT COUNT(*) as cnt FROM subdomains s ${domainWhere}`, params
   );
 
   const activeResult = await query<{ cnt: string }>(
-    `SELECT COUNT(*) as cnt FROM subdomains s ${whereClause} AND s.status = 'active'`, params
+    `SELECT COUNT(*) as cnt FROM subdomains s ${withStatus("s.status = 'active'")}`, params
   );
 
   const inactiveResult = await query<{ cnt: string }>(
-    `SELECT COUNT(*) as cnt FROM subdomains s ${whereClause} AND s.status = 'inactive'`, params
+    `SELECT COUNT(*) as cnt FROM subdomains s ${withStatus("s.status = 'inactive'")}`, params
   );
 
   const warmingResult = await query<{ cnt: string }>(
-    `SELECT COUNT(*) as cnt FROM subdomains s ${whereClause} AND s.status = 'warming' AND s.warmup_complete = false`, params
+    `SELECT COUNT(*) as cnt FROM subdomains s ${withStatus("s.status = 'warming' AND s.warmup_complete = false")}`, params
   );
 
   const byDomain = await query<{ domain: string; total: string; active: string }>(
     `SELECT d.domain, COUNT(*)::text as total,
             SUM(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END)::text as active
      FROM subdomains s JOIN domains d ON d.id = s.domain_id
-     GROUP BY d.domain ORDER BY d.domain`
+     ${domainWhere}
+     GROUP BY d.domain ORDER BY d.domain`,
+    params
   );
 
   return {
