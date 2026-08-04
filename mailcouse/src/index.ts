@@ -169,7 +169,11 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/dashboard', async (_req, res) => {
+app.get('/dashboard', (_req, res) => {
+  res.redirect('/portal/dashboard');
+});
+
+app.get('/monitoring/dashboard', async (_req, res) => {
   try {
     const data = await getDashboardData();
     const html = formatDashboardHTML(data as any);
