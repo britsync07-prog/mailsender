@@ -1,4 +1,5 @@
 import { query, closePool } from '../db/connection';
+import { config } from '../config';
 
 const DOMAINS = [
   {
@@ -11,7 +12,7 @@ const DOMAINS = [
   },
 ];
 
-const VPS_IP = '161.97.92.162';
+const VPS_IP = process.env.TARGET_IP || '161.97.92.162';
 
 const FIRST_NAMES = [
   'James', 'Mary', 'Robert', 'Patricia', 'Michael', 'Jennifer', 'David', 'Linda',
@@ -146,11 +147,11 @@ async function seed() {
   // IP pool
   await query(
     `INSERT INTO ip_pool (ip_address, vds_server_id, status, blacklisted, priority, ptr_record)
-     VALUES ($1, $2, 'active', false, 50, 'live.noblecircle.online')
+     VALUES ($1, $2, 'active', false, 50, $3)
      ON CONFLICT (ip_address) DO UPDATE SET
        vds_server_id = EXCLUDED.vds_server_id,
        status = 'active'`,
-    [VPS_IP, vdsId]
+    [VPS_IP, vdsId, config.dns.heloHostname]
   );
   console.log(`IP ${VPS_IP} added to pool.`);
 

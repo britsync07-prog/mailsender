@@ -5,8 +5,8 @@ import { config } from '../config';
 import fs from 'fs';
 import path from 'path';
 
-const TARGET_IP = '161.97.92.162';
-const BOUNCE_HOST = 'live.noblecircle.online';
+const TARGET_IP = process.env.TARGET_IP || '161.97.92.162';
+const BOUNCE_HOST = config.dns.returnPathDomain;
 
 const DOMAINS = [
   { name: 'noblecircle.online',    zoneId: '47098ef7772397a7cee6c35186b945ca' },

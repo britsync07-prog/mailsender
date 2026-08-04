@@ -248,7 +248,7 @@ async function deliverToMX(mxHost: string, port: number, envelopeFrom: string, t
       try {
         switch (step) {
           case 0:
-            if (code === 220) { step = 1; s.write(`EHLO mailcouse\r\n`); buf = ''; }
+            if (code === 220) { step = 1; s.write(`EHLO ${config.dns.heloHostname}\r\n`); buf = ''; }
             else done(null, { success: false, code, message: msg });
             break;
           case 1: step = 2; s.write(`MAIL FROM:<${envelopeFrom}>\r\n`); buf = ''; break;
@@ -322,8 +322,8 @@ router.post('/send', async (req: Request, res: Response) => {
       const to = msgData.to || '';
       const subject = msgData.subject || 'Test Message';
       const plainBody = msgData.plain_body || '';
-      const msgId = `<${crypto.randomUUID()}@mailcouse>`;
-      const receivedHeader = `Received: from web-ui (${ip}) by mailcouse with HTTP; ${new Date().toUTCString()}\r\n`;
+      const msgId = `<${crypto.randomUUID()}@${config.dns.returnPathDomain}>`;
+      const receivedHeader = `Received: from web-ui (${ip}) by ${config.dns.heloHostname} with HTTP; ${new Date().toUTCString()}\r\n`;
 
       let raw = `${receivedHeader}From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\n\r\n${plainBody}`;
 
@@ -358,8 +358,8 @@ router.post('/send', async (req: Request, res: Response) => {
     const recipients = to.split(/,\s*/).filter(Boolean);
     if (recipients.length === 0) return res.status(400).json({ error: 'No recipients' });
 
-    const envelopeFrom = `bounce+${orgId.slice(0, 8)}@live.noblecircle.online`;
-    const receivedHeader = `Received: from web-ui (${ip}) by mailcouse with HTTP; ${new Date().toUTCString()}\r\n`;
+    const envelopeFrom = `bounce+${orgId.slice(0, 8)}@${config.dns.returnPathDomain}`;
+    const receivedHeader = `Received: from web-ui (${ip}) by ${config.dns.heloHostname} with HTTP; ${new Date().toUTCString()}\r\n`;
 
     let rawMessage = `${receivedHeader}From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${plainBody}`;
 
@@ -1522,10 +1522,11 @@ router.post('/track-domains/:id/check', async (req: Request, res: Response) => {
     let dnsError = '';
     try {
       const cnameRecords = await dns.resolveCname(domain);
-      if (cnameRecords.some((r: string) => r.includes('mailcouse') || r.includes('noblecircle'))) {
+      const expectedTarget = config.dns.trackDomain.toLowerCase().replace(/\.$/, '');
+      if (cnameRecords.some((r: string) => r.toLowerCase().replace(/\.$/, '') === expectedTarget)) {
         dnsStatus = 'OK';
       } else {
-        dnsError = 'CNAME does not point to the expected target';
+        dnsError = `CNAME does not point to ${config.dns.trackDomain}`;
       }
     } catch (err: any) {
       dnsError = err.message;

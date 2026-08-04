@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'crypto';
 import { query } from '../db/connection';
+import { config } from '../config';
 import { EngagementEventType, EngagementEvent, TrackingPixelData, ClickTrackingData, ReplyTrackingData } from './types';
 
 /**
@@ -138,7 +139,7 @@ export function generateTrackingPixelUrl(
   leadId: string,
   subdomainId?: string
 ): string {
-  const baseUrl = process.env.TRACKING_BASE_URL || 'https://track.example.com';
+  const baseUrl = process.env.TRACKING_BASE_URL || `https://${config.dns.trackDomain}`;
   const params = new URLSearchParams({ lid: leadId });
   if (subdomainId) params.append('sid', subdomainId);
   return `${baseUrl}/pixel.gif?${params.toString()}`;
@@ -152,7 +153,7 @@ export function generateClickTrackingUrl(
   leadId: string,
   subdomainId?: string
 ): string {
-  const baseUrl = process.env.TRACKING_BASE_URL || 'https://track.example.com';
+  const baseUrl = process.env.TRACKING_BASE_URL || `https://${config.dns.trackDomain}`;
   const params = new URLSearchParams({
     url: originalUrl,
     lid: leadId,

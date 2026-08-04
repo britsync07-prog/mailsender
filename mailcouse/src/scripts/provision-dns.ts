@@ -3,9 +3,10 @@ import { query, closePool } from '../db/connection';
 import { generateKeyPair, extractPublicKeyBase64 } from '../dkim/key-generator';
 import { encryptPrivateKey } from '../dkim/key-store';
 import { buildSPFRecord, buildDMARCRecord, buildMXRecord, buildDKIMRecordSpec } from '../dns/record-builder';
+import { config } from '../config';
 
-const TARGET_IP = '161.97.92.162';
-const BOUNCE_HOST = 'live.noblecircle.online';
+const TARGET_IP = process.env.TARGET_IP || '161.97.92.162';
+const BOUNCE_HOST = config.dns.returnPathDomain;
 
 const DOMAINS = [
   { name: 'noblecircle.online',    zoneId: '47098ef7772397a7cee6c35186b945ca' },

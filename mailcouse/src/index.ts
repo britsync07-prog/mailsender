@@ -1068,7 +1068,7 @@ app.get('/portal/track-domains/add', async (req, res) => {
     const userData = await userRes.json();
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const header = await fetchServerHeader(token);
-    res.render('add-track-domain', { layout: 'layout', ...header, domains: domainData.domains || [], title: 'Add Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
+    res.render('add-track-domain', { layout: 'layout', ...header, domains: domainData.domains || [], trackingTarget: config.dns.trackDomain, title: 'Add Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 
@@ -1088,7 +1088,7 @@ app.get('/portal/track-domains/:id/edit', async (req, res) => {
     const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const trackDomain = await tdRes.json();
     const header = await fetchServerHeader(token);
-    res.render('add-track-domain', { layout: 'layout', ...header, domains: domainData.domains || [], trackDomain, title: 'Edit Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
+    res.render('add-track-domain', { layout: 'layout', ...header, domains: domainData.domains || [], trackDomain, trackingTarget: config.dns.trackDomain, title: 'Edit Tracking Domain', active: 'track-domains', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 

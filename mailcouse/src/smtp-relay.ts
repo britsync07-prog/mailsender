@@ -43,7 +43,7 @@ async function deliverEmail(mxHost: string, port: number, envelopeFrom: string, 
       try {
         switch (step) {
           case 0:
-            if (code === 220) { step = 1; s.write(`EHLO live.noblecircle.online\r\n`); buf = ''; }
+            if (code === 220) { step = 1; s.write(`EHLO ${config.dns.heloHostname}\r\n`); buf = ''; }
             else done(null, { success: false, code, message: msg });
             break;
           case 1: step = 2; s.write(`MAIL FROM:<${envelopeFrom}>\r\n`); buf = ''; break;
@@ -74,7 +74,7 @@ async function deliverEmail(mxHost: string, port: number, envelopeFrom: string, 
 
 export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
   const server = new SMTPServer({
-    name: 'mailcouse',
+    name: config.dns.heloHostname,
     banner: `Mailcouse SMTP - ${tier}`,
     authMethods: ['PLAIN', 'LOGIN'],
     allowInsecureAuth: true,
@@ -150,7 +150,7 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
         const envelopeFrom = envFromAddr;
         const ip = session.remoteAddress || 'unknown';
         const helo = session.hostNameAppearsAs || 'unknown';
-        const receivedHeader = `Received: from ${helo} (${ip}) by live.noblecircle.online with SMTP; ${new Date().toUTCString()}\r\n`;
+        const receivedHeader = `Received: from ${helo} (${ip}) by ${config.dns.heloHostname} with SMTP; ${new Date().toUTCString()}\r\n`;
 
         // Preserve original raw message, just prepend Received header
         let mimeMessage = receivedHeader + raw.toString('utf-8');
