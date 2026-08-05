@@ -240,7 +240,7 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
             fromAddr, rcptTo.join(', '), subject,
             parsed.html || '', parsed.text || '',
             JSON.stringify(parsed.headers || {}), size,
-            allSuccess ? 'sent' : 'failed',
+            allSuccess ? 'accepted' : 'failed',
             msgId,
           ]
         );

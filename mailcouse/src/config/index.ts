@@ -132,6 +132,8 @@ export const config = {
     routeDomain: platformEnv('DNS_ROUTE_DOMAIN', 'routes.noblecircle.online'),
     trackDomain: platformEnv('DNS_TRACK_DOMAIN', 'track.noblecircle.online'),
     heloHostname: platformEnv('DNS_HELO_HOSTNAME', 'live.noblecircle.online'),
+    outboundIpv4: process.env.OUTBOUND_IPV4 || process.env.OUTBOUND_LOCAL_ADDRESS || '',
+    outboundIpv6: process.env.OUTBOUND_IPV6 || '',
     dkimIdentifier: process.env.DNS_DKIM_IDENTIFIER || 'postal',
     domainVerifyPrefix: process.env.DNS_DOMAIN_VERIFY_PREFIX || 'postal-verification',
     customReturnPathPrefix: process.env.DNS_CUSTOM_RETURN_PATH_PREFIX || 'psrp',

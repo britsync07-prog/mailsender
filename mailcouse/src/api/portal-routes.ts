@@ -13,12 +13,14 @@ import {
   spfRecord,
   dkimRecord,
   dkimRecordName,
+  dkimSelectorRecordName,
   dkimIdentifier,
   returnPathDomain,
   dnsVerificationString,
   resolveTxt,
   checkDomainDNS,
   findVerifiedDomainForAddress,
+  DomainDNSChecks,
 } from './domain-logic';
 import crypto from 'crypto';
 import * as dns from 'dns';
@@ -105,9 +107,184 @@ async function markSubdomainsDnsReady(rootDomain: string): Promise<void> {
 
 // ─── Dashboard ────────────────────────────────────────────
 
+export const ACCEPTED_DELIVERY_LABEL = 'Accepted by recipient server';
+
+type DashboardAlert = {
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  cause: string;
+  fix: string;
+  last_checked_at: Date | string | null;
+  domain_id?: string;
+  domain?: string;
+  setup_url?: string;
+};
+
+type CheckableDomain = {
+  id: string;
+  domain: string;
+  dkim_selector: string | null;
+  dkim_public_key: string | null;
+};
+
+function needsAuthRefresh(details: string | null): boolean {
+  return /5\.7\.26|dkim|spf|unauthenticated|starttls/i.test(details || '');
+}
+
+async function updateDomainDnsStatus(domain: CheckableDomain, orgId: string): Promise<DomainDNSChecks> {
+  const selector = domain.dkim_selector || '';
+  const expectedDkim = dkimRecord(domain.dkim_public_key || '');
+  const { checks } = await checkDomainDNS(domain.domain, selector, expectedDkim);
+  await query(
+    `UPDATE customer_domains SET spf_status = $1, spf_error = $2, dkim_status = $3, dkim_error = $4,
+            mx_status = $5, mx_error = $6, return_path_status = $7, return_path_error = $8,
+            dkim_observed_selector = $9, dkim_observed_name = $10, dkim_observed_value = $11,
+            spf_observed_record = $12, dns_checked_at = NOW()
+     WHERE id = $13 AND organization_id = $14`,
+    [
+      checks.spf.status, checks.spf.error,
+      checks.dkim.status, checks.dkim.error,
+      checks.mx.status, checks.mx.error,
+      checks.return_path.status, checks.return_path.error,
+      checks.dkim.selector || selector,
+      checks.dkim.checked_name || `${selector}._domainkey.${domain.domain}`,
+      checks.dkim.found || null,
+      checks.spf.found || null,
+      domain.id,
+      orgId,
+    ]
+  );
+  return checks;
+}
+
+async function refreshDashboardDomainChecks(orgId: string): Promise<void> {
+  const result = await query<CheckableDomain>(
+    `SELECT DISTINCT cd.id, cd.domain, cd.dkim_selector, cd.dkim_public_key
+     FROM customer_domains cd
+     LEFT JOIN sent_messages sm ON sm.customer_domain_id = cd.id AND sm.organization_id = cd.organization_id
+     LEFT JOIN delivery_attempts da ON da.sent_message_id = sm.id
+       AND da.status = 'failed'
+       AND da.created_at > NOW() - INTERVAL '24 hours'
+     WHERE cd.organization_id = $1
+       AND cd.verified = true
+       AND (
+         cd.dns_checked_at IS NULL
+         OR cd.dns_checked_at < NOW() - INTERVAL '10 minutes'
+         OR da.details ~* '(5\\.7\\.26|dkim|spf|unauthenticated|starttls)'
+       )`,
+    [orgId]
+  );
+
+  for (const domain of result.rows) {
+    try {
+      await updateDomainDnsStatus(domain, orgId);
+    } catch (err) {
+      console.error(`Dashboard DNS refresh failed for ${domain.domain}:`, err);
+    }
+  }
+}
+
+function dnsAlert(domain: any, kind: 'spf' | 'dkim'): DashboardAlert | null {
+  const status = domain[`${kind}_status`];
+  const error = domain[`${kind}_error`];
+  if (!status || status === 'OK') return null;
+  const checked = kind === 'dkim' ? domain.dkim_observed_name : domain.domain;
+  return {
+    severity: kind === 'spf' || kind === 'dkim' ? 'critical' : 'warning',
+    title: kind === 'dkim' ? `DKIM ${status} for ${domain.domain}` : `SPF ${status} for ${domain.domain}`,
+    cause: error || `${kind.toUpperCase()} check is ${status}`,
+    fix: kind === 'dkim'
+      ? `Add or correct TXT ${checked || `${domain.dkim_selector}._domainkey.${domain.domain}`} with the public key shown on domain setup.`
+      : `Update the SPF TXT record at ${domain.domain} so it authorizes the actual outbound IP addresses used by this server.`,
+    last_checked_at: domain.dns_checked_at,
+    domain_id: domain.id,
+    domain: domain.domain,
+    setup_url: `/portal/domains/${domain.id}/setup`,
+  };
+}
+
+export async function buildDashboardAlerts(orgId: string): Promise<DashboardAlert[]> {
+  const alerts: DashboardAlert[] = [];
+  const domains = await query(
+    `SELECT id, domain, dns_checked_at, spf_status, spf_error, dkim_status, dkim_error,
+            dkim_selector, dkim_observed_name, dkim_observed_value, spf_observed_record
+     FROM customer_domains
+     WHERE organization_id = $1
+     ORDER BY domain ASC`,
+    [orgId]
+  );
+
+  for (const domain of domains.rows) {
+    const spf = dnsAlert(domain, 'spf');
+    const dkim = dnsAlert(domain, 'dkim');
+    if (spf) alerts.push(spf);
+    if (dkim) alerts.push(dkim);
+  }
+
+  const failures = await query(
+    `SELECT cd.id as domain_id, COALESCE(cd.domain, split_part(sm.mail_from, '@', 2)) as domain,
+            da.smtp_code, da.details, COUNT(*)::int as copies, MAX(da.created_at) as last_checked_at
+     FROM delivery_attempts da
+     JOIN sent_messages sm ON sm.id = da.sent_message_id
+     LEFT JOIN customer_domains cd ON cd.id = sm.customer_domain_id
+     WHERE sm.organization_id = $1
+       AND da.status = 'failed'
+       AND da.created_at > NOW() - INTERVAL '24 hours'
+     GROUP BY cd.id, cd.domain, split_part(sm.mail_from, '@', 2), da.smtp_code, da.details
+     ORDER BY
+       CASE WHEN da.details ~* '5\\.7\\.26|unauthenticated|dkim|spf' THEN 0
+            WHEN da.details ~* 'starttls' THEN 1
+            WHEN da.smtp_code BETWEEN 400 AND 499 THEN 2
+            ELSE 3 END,
+       MAX(da.created_at) DESC
+     LIMIT 10`,
+    [orgId]
+  );
+
+  for (const failure of failures.rows) {
+    const detail = failure.details || 'SMTP delivery failed';
+    const auth = needsAuthRefresh(detail);
+    alerts.push({
+      severity: auth ? 'critical' : 'warning',
+      title: auth ? `Authentication failure for ${failure.domain || 'domain'}` : `Delivery failure for ${failure.domain || 'domain'}`,
+      cause: detail,
+      fix: auth ? 'Fix SPF/DKIM for this sending domain and run domain checks again.' : 'Review the recipient MX response and retry after correcting the delivery issue.',
+      last_checked_at: failure.last_checked_at,
+      domain_id: failure.domain_id || undefined,
+      domain: failure.domain || undefined,
+      setup_url: failure.domain_id ? `/portal/domains/${failure.domain_id}/setup` : undefined,
+    });
+  }
+
+  const duplicates = await query(
+    `SELECT message_id, COUNT(*)::int as copies, MAX(created_at) as last_checked_at
+     FROM sent_messages
+     WHERE organization_id = $1
+       AND created_at > NOW() - INTERVAL '24 hours'
+       AND message_id IS NOT NULL
+     GROUP BY message_id
+     HAVING COUNT(*) > 1
+     ORDER BY COUNT(*) DESC, MAX(created_at) DESC
+     LIMIT 10`,
+    [orgId]
+  );
+
+  for (const row of duplicates.rows) {
+    alerts.push({
+      severity: 'warning',
+      title: 'Duplicate Message-ID detected',
+      cause: `${row.copies} messages reused ${row.message_id}; Gmail may thread or suppress obvious duplicates.`,
+      fix: 'Generate a new Message-ID for every new outbound send. Redelivery can intentionally reuse an ID only when replaying the same message.',
+      last_checked_at: row.last_checked_at,
+    });
+  }
+
+  return alerts;
+}
 router.get('/dashboard', async (req: Request, res: Response) => {
   try {
     const orgId = req.user!.orgId!;
+    await refreshDashboardDomainChecks(orgId);
 
     const domainCount = await query<{ cnt: string }>(
       'SELECT COUNT(*) as cnt FROM customer_domains WHERE organization_id = $1',
@@ -120,7 +297,7 @@ router.get('/dashboard', async (req: Request, res: Response) => {
     );
 
     const sentCount = await query<{ cnt: string }>(
-      "SELECT COUNT(*) as cnt FROM sent_messages WHERE organization_id = $1 AND status = 'sent'",
+      "SELECT COUNT(*) as cnt FROM sent_messages WHERE organization_id = $1 AND status IN ('accepted', 'sent')",
       [orgId]
     );
 
@@ -170,6 +347,8 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       [orgId]
     );
 
+    const domainAlerts = await buildDashboardAlerts(orgId);
+
     let server: { mode: string; suspended: boolean; send_limit: number | null } = { mode: 'live', suspended: false, send_limit: null };
     try {
       const serverResult = await query<{ mode: string; suspended_at: Date | null; send_limit: number | null }>(
@@ -201,6 +380,8 @@ router.get('/dashboard', async (req: Request, res: Response) => {
         ),
       },
       recentMessages: recentMessages.rows,
+      domain_alerts: domainAlerts,
+      delivery_label: ACCEPTED_DELIVERY_LABEL,
       server: { mode: server.mode, suspended: server.suspended },
       domain_stats: {
         total: parseInt(domainStats.rows[0].total),
@@ -388,7 +569,7 @@ router.post('/send', async (req: Request, res: Response) => {
       `INSERT INTO sent_messages (organization_id, customer_domain_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'outgoing')
        RETURNING id`,
-      [orgId, customerDomain.id, from, to, subject, plainBody, '', rawMessage.length, allSuccess ? 'sent' : 'failed', msgId]
+      [orgId, customerDomain.id, from, to, subject, plainBody, '', rawMessage.length, allSuccess ? 'accepted' : 'failed', msgId]
     );
 
     const messageId = msgResult.rows[0].id;
@@ -398,7 +579,7 @@ router.post('/send', async (req: Request, res: Response) => {
       await query(
         `INSERT INTO delivery_attempts (sent_message_id, organization_id, rcpt_to, status, smtp_code, details, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [messageId, orgId, dr.to, dr.success ? 'delivered' : 'failed', dr.code, dr.message]
+        [messageId, orgId, dr.to, dr.success ? 'accepted' : 'failed', dr.code, dr.message]
       );
     }
 
@@ -430,7 +611,7 @@ router.get('/domains', async (req: Request, res: Response) => {
 router.get('/domains/:id/setup', async (req: Request, res: Response) => {
   try {
     const domainResult = await query<{
-      id: string; domain: string; dkim_identifier_string: string;
+      id: string; domain: string; dkim_identifier_string: string; dkim_selector: string;
       dkim_public_key: string; verification_token: string;
       verified: boolean; dns_checked_at: Date | null;
       spf_status: string | null; spf_error: string | null;
@@ -438,7 +619,7 @@ router.get('/domains/:id/setup', async (req: Request, res: Response) => {
       mx_status: string | null; mx_error: string | null;
       return_path_status: string | null; return_path_error: string | null;
     }>(
-      `SELECT id, domain, dkim_identifier_string, dkim_public_key, verification_token,
+      `SELECT id, domain, dkim_identifier_string, dkim_selector, dkim_public_key, verification_token,
               verified, dns_checked_at, spf_status, spf_error, dkim_status, dkim_error,
               mx_status, mx_error, return_path_status, return_path_error
        FROM customer_domains WHERE id = $1 AND organization_id = $2`,
@@ -475,7 +656,7 @@ router.get('/domains/:id/setup', async (req: Request, res: Response) => {
       verified: d.verified,
       dns_checked_at: d.dns_checked_at,
       spf_record: spfRecord(),
-      dkim_record_name: dkimRecordName(identifierString),
+      dkim_record_name: dkimSelectorRecordName(d.dkim_selector || identifierString),
       dkim_record: dkimRecord(d.dkim_public_key || ''),
       return_path_domain: returnPathDomain(d.domain),
       return_path_target: config.dns.returnPathDomain,
@@ -613,36 +794,47 @@ router.post('/domains/:id/verify', async (req: Request, res: Response) => {
 router.post('/domains/:id/check', async (req: Request, res: Response) => {
   try {
     const domainResult = await query<{
-      id: string; domain: string; dkim_identifier_string: string; dkim_public_key: string;
+      id: string; domain: string; dkim_identifier_string: string; dkim_selector: string; dkim_public_key: string;
     }>(
-      'SELECT id, domain, dkim_identifier_string, dkim_public_key FROM customer_domains WHERE id = $1 AND organization_id = $2',
+      'SELECT id, domain, dkim_identifier_string, dkim_selector, dkim_public_key FROM customer_domains WHERE id = $1 AND organization_id = $2',
       [req.params.id, req.user!.orgId!]
     );
     if (domainResult.rows.length === 0) return res.status(404).json({ error: 'Domain not found' });
 
     const d = domainResult.rows[0];
-    const identifierString = d.dkim_identifier_string || '';
-    const { checks, ok } = await checkDomainDNS(d.domain, identifierString, dkimRecord(d.dkim_public_key || ''));
+    const selector = d.dkim_selector || d.dkim_identifier_string || '';
+    const { checks, ok } = await checkDomainDNS(d.domain, selector, dkimRecord(d.dkim_public_key || ''));
 
     await query(
       `UPDATE customer_domains SET spf_status = $1, spf_error = $2, dkim_status = $3, dkim_error = $4,
-              mx_status = $5, mx_error = $6, return_path_status = $7, return_path_error = $8, dns_checked_at = NOW()
-       WHERE id = $9`,
+              mx_status = $5, mx_error = $6, return_path_status = $7, return_path_error = $8,
+              dkim_observed_selector = $9, dkim_observed_name = $10, dkim_observed_value = $11,
+              spf_observed_record = $12, dns_checked_at = NOW()
+       WHERE id = $13 AND organization_id = $14`,
       [
         checks.spf.status, checks.spf.error,
         checks.dkim.status, checks.dkim.error,
         checks.mx.status, checks.mx.error,
         checks.return_path.status, checks.return_path.error,
+        checks.dkim.selector || selector,
+        checks.dkim.checked_name || `${selector}._domainkey.${d.domain}`,
+        checks.dkim.found || null,
+        checks.spf.found || null,
         req.params.id,
+        req.user!.orgId!,
       ]
     );
 
     if (ok) {
       await markSubdomainsDnsReady(d.domain);
-      return res.json({ dns_ok: true, redirect: '/portal/domains', flash: { notice: `Your DNS records for ${d.domain} look good! Subdomains are ready for warmup.` } });
+      return res.json({ dns_ok: true, ok, checks, passed: Object.entries(checks).filter(([, c]: any) => c.status === 'OK'), failed: Object.entries(checks).filter(([, c]: any) => c.status !== 'OK'), redirect: '/portal/domains', flash: { notice: `Your DNS records for ${d.domain} look good! Subdomains are ready for warmup.` } });
     }
     return res.json({
       dns_ok: false,
+      ok,
+      checks,
+      passed: Object.entries(checks).filter(([, c]: any) => c.status === 'OK'),
+      failed: Object.entries(checks).filter(([, c]: any) => c.status !== 'OK'),
       redirect: `/portal/domains/${d.id}/setup`,
       flash: { alert: 'There seems to be something wrong with your DNS records. Check below for information.' },
     });

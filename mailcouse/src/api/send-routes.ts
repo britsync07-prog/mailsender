@@ -67,6 +67,7 @@ router.post('/', async (req: Request, res: Response) => {
     let lastError = '';
 
     for (const mx of mxRecords) {
+      let sentMessageId: string | null = null;
       try {
         const transporter = nodemailer.createTransport({
           host: mx.exchange,
@@ -88,12 +89,14 @@ router.post('/', async (req: Request, res: Response) => {
         );
         const leadId = leadRes.rows[0].id;
 
-        await query(
+        const sentMessageResult = await query(
           `INSERT INTO sent_messages
-           (organization_id, subdomain_id, mail_from, rcpt_to, subject, message_id, status, sent_at)
-           VALUES ((SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1), $1, $2, $3, $4, $5, 'sent', NOW())`,
+           (organization_id, subdomain_id, mail_from, rcpt_to, subject, message_id, status)
+           VALUES ((SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1), $1, $2, $3, $4, $5, 'processing')
+           RETURNING id`,
           [sub.id, envelopeFrom, to.toLowerCase(), subject, msgId]
         );
+        sentMessageId = sentMessageResult.rows[0].id;
 
         await query(
           'UPDATE leads SET send_count = send_count + 1 WHERE id = $1',
@@ -128,6 +131,8 @@ ${body.replace(/\n/g, '<br>\n')}
 
         transporter.close();
 
+        await query('UPDATE sent_messages SET status = $1, sent_at = NOW() WHERE id = $2', ['accepted', sentMessageId]);
+
         await query(
           `UPDATE subdomains SET emails_sent_today = emails_sent_today + 1, total_sent = total_sent + 1 WHERE id = $1`,
           [sub.id]
@@ -142,6 +147,9 @@ ${body.replace(/\n/g, '<br>\n')}
         });
       } catch (err: any) {
         lastError = err.message || err.code || String(err);
+        if (sentMessageId) {
+          await query('UPDATE sent_messages SET status = $1 WHERE id = $2', ['failed', sentMessageId]);
+        }
         if (lastError.includes('ENOTFOUND')) break;
       }
     }

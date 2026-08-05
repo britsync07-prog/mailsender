@@ -1,5 +1,32 @@
 <%- include('partials/server-header', { activeNav: 'overview', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
 
+    <% const alerts = domain_alerts || []; %>
+    <% if (alerts.length > 0) { %>
+      <div class="titleWithLinks u-margin">
+        <h2 class="titleWithLinks__title">Domain Alerts</h2>
+        <ul class="titleWithLinks__links">
+          <% const firstDomainAlert = alerts.find(function(a) { return a.setup_url; }); %>
+          <% if (firstDomainAlert) { %>
+            <li><a href="<%= firstDomainAlert.setup_url %>" class="titleWithLinks__link">Open domain setup</a></li>
+          <% } %>
+        </ul>
+      </div>
+      <div class="messageList u-margin">
+        <% alerts.forEach(function(alert) { %>
+          <div class="messageList__item messageList__item--<%= alert.severity %>">
+            <div class="messageList__main">
+              <h3 class="messageList__subject"><%= alert.title %></h3>
+              <p class="messageList__meta"><strong>Cause:</strong> <%= alert.cause %></p>
+              <p class="messageList__meta"><strong>Fix:</strong> <%= alert.fix %></p>
+              <p class="messageList__meta"><strong>Last checked:</strong> <%= alert.last_checked_at ? new Date(alert.last_checked_at).toLocaleString() : 'Never' %></p>
+            </div>
+            <% if (alert.setup_url) { %>
+              <div class="messageList__actions"><a class="button button--small" href="<%= alert.setup_url %>">Setup</a></div>
+            <% } %>
+          </div>
+        <% }) %>
+      </div>
+    <% } %>
 <% if (recentMessages && recentMessages.length > 0) { %>
   <div class="pageContent">
     <% if (serverMode === 'suspended') { %>
@@ -23,6 +50,7 @@
     <div class="titleWithLinks u-margin">
       <h2 class="titleWithLinks__title">Recently processed e-mails</h2>
       <ul class="titleWithLinks__links">
+        <li class="titleWithLinks__link"><%= delivery_label || 'Accepted by recipient server' %></li>
         <li><a href="/portal/messages?scope=queued" class="titleWithLinks__link">View message queue</a></li>
         <li><a href="/portal/messages" class="titleWithLinks__link">View full e-mail history</a></li>
       </ul>
