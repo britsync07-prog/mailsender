@@ -825,8 +825,8 @@ app.get('/portal/help/outgoing', async (req, res) => {
       email: userData.user?.email || '', token,
       smtpHost: config.dns.heloHostname || config.api.host,
       smtpPort: config.platform.smtpPort,
-      smtpUsername: settingsData.credentials?.[0]?.username || '',
-      permalink: (settingsData.server?.name || 'mailserver') + '.' + config.dns.routeDomain,
+      smtpPorts: config.platform.smtpPorts,
+      smtpUsername: settingsData.credentials?.find?.((c: any) => c.type?.includes?.('smtp'))?.username || settingsData.credentials?.[0]?.username || '',
       maxAttempts: 3,
     });
   } catch { res.redirect('/login'); }

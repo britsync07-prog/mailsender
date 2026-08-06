@@ -24,7 +24,6 @@ import {
 } from './domain-logic';
 import crypto from 'crypto';
 import * as dns from 'dns';
-import * as net from 'net';
 import nodemailer from 'nodemailer';
 
 const router = Router();
@@ -398,66 +397,38 @@ router.get('/dashboard', async (req: Request, res: Response) => {
 
 // ─── Send Message ─────────────────────────────────────────
 
-function getLastCode(response: string): { code: number; msg: string; isFinal: boolean } | null {
-  const lines = response.trim().split('\r\n');
-  const lastLine = lines[lines.length - 1];
-  const m = lastLine.match(/^(\d{3})([ -])(.*)/);
-  if (!m) return null;
-  return { code: parseInt(m[1]), msg: m[3], isFinal: m[2] === ' ' };
+async function resolveMxIpv4(mxHost: string): Promise<string> {
+  try {
+    const addrs = await dns.promises.resolve4(mxHost);
+    if (addrs.length > 0) return addrs[0];
+  } catch {}
+  return mxHost;
 }
 
 async function deliverToMX(mxHost: string, port: number, envelopeFrom: string, to: string, message: string): Promise<{ success: boolean; code: number; message: string }> {
-  return new Promise((resolve, reject) => {
-    const s = new net.Socket();
-    let buf = '';
-    let step = 0;
-    let settled = false;
+  // Resolve to IPv4 explicitly (SPF records do not cover this host's IPv6) and
+  // use nodemailer so the connection upgrades with STARTTLS (encrypted).
+  const ipv4Host = await resolveMxIpv4(mxHost);
 
-    const done = (err?: any, result?: { success: boolean; code: number; message: string }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      s.destroy();
-      if (err) reject(err);
-      else if (result) resolve(result);
-    };
-
-    const timer = setTimeout(() => done(new Error('SMTP total timeout')), 15000);
-
-    const tryProcess = () => {
-      const parsed = getLastCode(buf);
-      if (!parsed || !parsed.isFinal) return;
-      const { code, msg } = parsed;
-      try {
-        switch (step) {
-          case 0:
-            if (code === 220) { step = 1; s.write(`EHLO ${config.dns.heloHostname}\r\n`); buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 1: step = 2; s.write(`MAIL FROM:<${envelopeFrom}>\r\n`); buf = ''; break;
-          case 2:
-            if (code === 250) { step = 3; s.write(`RCPT TO:<${to}>\r\n`); buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 3:
-            if (code === 250) { step = 4; s.write(`DATA\r\n`); buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 4:
-            if (code === 354) { s.write(`${message}\r\n.\r\n`); step = 5; buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 5: done(null, { success: code >= 200 && code < 300, code, message: msg }); break;
-        }
-      } catch (e: any) { done(e); }
-    };
-
-    s.on('data', (data: Buffer) => { buf += data.toString(); tryProcess(); });
-    s.on('error', (err) => done(err));
-    s.on('timeout', () => done(new Error('SMTP idle timeout')));
-    s.setTimeout(15000);
-    s.connect(port, mxHost);
+  const transporter = nodemailer.createTransport({
+    host: ipv4Host,
+    port,
+    secure: false,
+    tls: { rejectUnauthorized: false, servername: mxHost },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
   });
+
+  try {
+    const info = await transporter.sendMail({ raw: message, envelope: { from: envelopeFrom, to: [to] } });
+    transporter.close();
+    const code = parseInt(String(info.response).split(' ')[0]) || 0;
+    return { success: code >= 200 && code < 300, code, message: info.response };
+  } catch (err: any) {
+    transporter.close();
+    return { success: false, code: err.responseCode || 0, message: err.message || String(err) };
+  }
 }
 
 async function deliverToRecipients(envelopeFrom: string, recipients: string[], rawMessage: string): Promise<{ to: string; success: boolean; code: number; message: string }[]> {

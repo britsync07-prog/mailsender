@@ -8,6 +8,14 @@ import { checkWarmupGate } from '../warmup/gate';
 
 const router = Router();
 
+async function resolveMxIpv4(mxHost: string): Promise<string> {
+  try {
+    const addrs = await dns.promises.resolve4(mxHost);
+    if (addrs.length > 0) return addrs[0];
+  } catch {}
+  return mxHost;
+}
+
 router.post('/', async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
@@ -70,10 +78,10 @@ router.post('/', async (req: Request, res: Response) => {
       let sentMessageId: string | null = null;
       try {
         const transporter = nodemailer.createTransport({
-          host: mx.exchange,
+          host: (await resolveMxIpv4(mx.exchange)),
           port: 25,
           secure: false,
-          tls: { rejectUnauthorized: false },
+          tls: { rejectUnauthorized: false, servername: mx.exchange },
           dkim: keyData ? {
             domainName: sub.root_domain,
             keySelector: keyData.selector,

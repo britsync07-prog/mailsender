@@ -2,83 +2,42 @@ import { SMTPServer, SMTPServerSession, SMTPServerDataStream, SMTPServerAuthenti
 import { simpleParser, ParsedMail } from 'mailparser';
 import bcrypt from 'bcryptjs';
 import * as dns from 'dns';
-import * as net from 'net';
 import * as nodemailer from 'nodemailer';
 import crypto from 'crypto';
+import fs from 'fs';
 import { query } from './db/connection';
 import { config } from './config';
 import { getDomainDKIMPrivateKey } from './dkim/key-store';
 import { findVerifiedDomainForAddress } from './api/domain-logic';
 
-function getLastCode(response: string): { code: number; msg: string; isFinal: boolean } | null {
-  const lines = response.trim().split('\r\n');
-  const lastLine = lines[lines.length - 1];
-  const m = lastLine.match(/^(\d{3})([ -])(.*)/);
-  if (!m) return null;
-  return { code: parseInt(m[1]), msg: m[3], isFinal: m[2] === ' ' };
-}
-
-async function deliverEmail(mxHost: string, port: number, envelopeFrom: string, to: string, message: string): Promise<{ success: boolean; code: number; message: string }> {
-  return new Promise((resolve, reject) => {
-    const s = new net.Socket();
-    let buf = '';
-    let step = 0;
-    let settled = false;
-
-    const done = (err?: any, result?: { success: boolean; code: number; message: string }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      s.destroy();
-      if (err) reject(err);
-      else if (result) resolve(result);
-    };
-
-    const timer = setTimeout(() => done(new Error('SMTP total timeout')), 15000);
-
-    const tryProcess = () => {
-      const parsed = getLastCode(buf);
-      if (!parsed || !parsed.isFinal) return;
-      const { code, msg } = parsed;
-      try {
-        switch (step) {
-          case 0:
-            if (code === 220) { step = 1; s.write(`EHLO ${config.dns.heloHostname}\r\n`); buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 1: step = 2; s.write(`MAIL FROM:<${envelopeFrom}>\r\n`); buf = ''; break;
-          case 2:
-            if (code === 250) { step = 3; s.write(`RCPT TO:<${to}>\r\n`); buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 3:
-            if (code === 250) { step = 4; s.write(`DATA\r\n`); buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 4:
-            if (code === 354) { s.write(`${message}\r\n.\r\n`); step = 5; buf = ''; }
-            else done(null, { success: false, code, message: msg });
-            break;
-          case 5: done(null, { success: code >= 200 && code < 300, code, message: msg }); break;
-        }
-      } catch (e: any) { done(e); }
-    };
-
-    s.on('connect', () => {});
-    s.on('data', (data: Buffer) => { buf += data.toString(); tryProcess(); });
-    s.on('error', (err) => done(err));
-    s.on('timeout', () => done(new Error('SMTP idle timeout')));
-    s.connect(port, mxHost);
-  });
+async function resolveMxIpv4(mxHost: string): Promise<string> {
+  try {
+    const addrs = await dns.promises.resolve4(mxHost);
+    if (addrs.length > 0) return addrs[0];
+  } catch {}
+  return mxHost;
 }
 
 export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
+  let tlsOpts: { key: Buffer; cert: Buffer } | undefined;
+  try {
+    if (config.dns.tlsCert && config.dns.tlsKey) {
+      tlsOpts = {
+        key: fs.readFileSync(config.dns.tlsKey),
+        cert: fs.readFileSync(config.dns.tlsCert),
+      };
+    }
+  } catch (err: any) {
+    console.error(`[smtp-relay:${tier}] Failed to load TLS cert for STARTTLS, falling back to plaintext:`, err.message);
+  }
+
   const server = new SMTPServer({
     name: config.dns.heloHostname,
     banner: `Mailcouse SMTP - ${tier}`,
     authMethods: ['PLAIN', 'LOGIN'],
-    allowInsecureAuth: true,
-    disabledCommands: ['STARTTLS'],
+    allowInsecureAuth: !tlsOpts,
+    disabledCommands: tlsOpts ? [] : ['STARTTLS'],
+    ...(tlsOpts ? { key: tlsOpts.key, cert: tlsOpts.cert } : {}),
 
     async onAuth(auth: SMTPServerAuthentication, session: SMTPServerSession, callback: (err: Error | null | undefined, response?: SMTPServerAuthenticationResponse) => void) {
       try {
@@ -191,10 +150,10 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
               try {
                 const keyData = await getDomainDKIMPrivateKey(customerDomain.id);
                 const transporter = nodemailer.createTransport({
-                  host: mx.exchange,
+                  host: await resolveMxIpv4(mx.exchange),
                   port: 25,
                   secure: false,
-                  tls: { rejectUnauthorized: false },
+                  tls: { rejectUnauthorized: false, servername: mx.exchange },
                   dkim: keyData ? {
                     domainName: customerDomain.domain,
                     keySelector: keyData.selector,

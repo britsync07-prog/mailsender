@@ -42,24 +42,31 @@
     <dl class="pageContent__definitions">
       <dt>SMTP Server Address</dt>
       <dd><p class="pageContent__definitionCode"><%= smtpHost %></p></dd>
-      <dt>Port</dt>
+      <dt>Ports</dt>
       <dd>
-        <p class="pageContent__definitionCode"><%= smtpPort %></p>
-        <p class="pageContent__definitionText">The SMTP service supports STARTTLS if you wish to send messages securely. Be aware that security cannot guaranteed all the way to their final destination.</p>
+        <p class="pageContent__definitionCode">
+          <% var tiers = Object.entries(smtpPorts); %>
+          <% tiers.forEach(function(p, i) { %>
+            <span><b><%= p[0] %></b>: <%= p[1] %><%= i < tiers.length - 1 ? ' ' : '' %></span>
+          <% }) %>
+        </p>
+        <p class="pageContent__definitionText">All ports support STARTTLS for sending messages securely. Be aware that security cannot be guaranteed all the way to their final destination.</p>
       </dd>
       <dt>Username</dt>
-      <dd><p class="pageContent__definitionCode"><%= permalink %></p></dd>
-      <dt>Password</dt>
       <dd>
         <% if (smtpUsername) { %>
           <p class="pageContent__definitionCode"><%= smtpUsername %></p>
-          <p class="pageContent__definitionText"><a href="/portal/credentials" class="u-link">Create more credentials</a></p>
+          <p class="pageContent__definitionText">This is the username of a credential you created under <a href="/portal/credentials" class="u-link">Credentials</a>.</p>
         <% } else { %>
-          <p class="warningBox"><b>No SMTP credentials created for this server yet.</b> A password can be generated from the <a href="/portal/credentials/add" class="u-link">credentials</a> page. Just create a credential with the <b>SMTP</b> type and add a name which suits the place you'll be using the credentials.</p>
+          <p class="warningBox"><b>No SMTP credentials created for this tenant yet.</b> Create a credential with the <b>SMTP</b> type from the <a href="/portal/credentials/add" class="u-link">credentials</a> page.</p>
         <% } %>
       </dd>
+      <dt>Password</dt>
+      <dd>
+        <p class="pageContent__definitionText">Use the password that was shown <b>once</b> when you created the credential from the <a href="/portal/credentials" class="u-link">Credentials</a> page. It cannot be retrieved again; create a new credential if you lost it.</p>
+      </dd>
       <dt>Authentication Methods</dt>
-      <dd><p class="pageContent__definitionCode">PLAIN, LOGIN or CRAM-MD5</p></dd>
+      <dd><p class="pageContent__definitionCode">PLAIN, LOGIN</p></dd>
     </dl>
   </div>
   <div class="u-margin">

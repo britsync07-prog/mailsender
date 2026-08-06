@@ -877,3 +877,54 @@ html.subPage .errorExplanation { background:none; padding-left:15px; line-height
   border-color: #39b0ab;
 }
 .newMessageType a { color: inherit; text-decoration: underline; }
+
+/* Credential creation modal */
+.credentialOverlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.credentialModal {
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  padding: 24px;
+  width: 480px;
+  max-width: 92vw;
+  position: relative;
+}
+.credentialModal__close {
+  position: absolute;
+  top: 8px; right: 12px;
+  border: 0;
+  background: transparent;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  color: #999;
+}
+.credentialModal__close:hover { color: #333; }
+.credentialModal__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.credentialModal__text { margin: 0 0 16px; color: #666; }
+.credentialModal__field { margin-bottom: 14px; }
+.credentialModal__label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #444;
+}
+.credentialModal__row {
+  display: flex;
+  gap: 8px;
+}
+.credentialModal__row .input { flex: 1; }
+.credentialModal__actions { margin-top: 18px; text-align: right; }
