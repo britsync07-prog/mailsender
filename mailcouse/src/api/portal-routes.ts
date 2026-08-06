@@ -405,6 +405,16 @@ async function resolveMxIpv4(mxHost: string): Promise<string> {
   return mxHost;
 }
 
+function parseSender(input: string): { address: string; headerFrom: string } {
+  const match = input.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  if (match && match[2]) {
+    const name = match[1].trim();
+    const address = match[2].trim();
+    return { address, headerFrom: name ? `${name} <${address}>` : address };
+  }
+  return { address: input.trim(), headerFrom: input.trim() };
+}
+
 async function deliverToMX(mxHost: string, port: number, envelopeFrom: string, to: string, message: string): Promise<{ success: boolean; code: number; message: string }> {
   // Resolve to IPv4 explicitly (SPF records do not cover this host's IPv6) and
   // use nodemailer so the connection upgrades with STARTTLS (encrypted).
@@ -512,10 +522,12 @@ router.post('/send', async (req: Request, res: Response) => {
     const recipients = to.split(/,\s*/).filter(Boolean);
     if (recipients.length === 0) return res.status(400).json({ error: 'No recipients' });
 
+    const sender = parseSender(from);
+    const headerFrom = sender.headerFrom;
     const envelopeFrom = `bounce+${orgId.slice(0, 8)}@${config.dns.returnPathDomain}`;
     const receivedHeader = `Received: from web-ui (${ip}) by ${config.dns.heloHostname} with HTTP; ${new Date().toUTCString()}\r\n`;
 
-    let rawMessage = `${receivedHeader}From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${plainBody}`;
+    let rawMessage = `${receivedHeader}From: ${headerFrom}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${plainBody}`;
 
     // DKIM sign (proper canonicalization via nodemailer)
     try {
@@ -528,7 +540,7 @@ router.post('/send', async (req: Request, res: Response) => {
           dkim: { domainName: customerDomain.domain, keySelector: keyData.selector, privateKey: keyData.privateKey },
         });
         const info = await capture.sendMail({
-          from, to, subject,
+          from: headerFrom, to, subject,
           text: plainBody,
           messageId: msgId,
           date: new Date(),
