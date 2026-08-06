@@ -25,6 +25,7 @@ import {
 import crypto from 'crypto';
 import * as dns from 'dns';
 import * as net from 'net';
+import nodemailer from 'nodemailer';
 
 const router = Router();
 router.use(authenticate);
@@ -545,18 +546,24 @@ router.post('/send', async (req: Request, res: Response) => {
 
     let rawMessage = `${receivedHeader}From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${plainBody}`;
 
-    // DKIM sign
+    // DKIM sign (proper canonicalization via nodemailer)
     try {
       const keyData = await getDomainDKIMPrivateKey(customerDomain.id);
       if (keyData) {
-        const signHdrs = ['from', 'to', 'subject', 'date', 'message-id'];
-        const hdrList = signHdrs.join(':');
-        const bodyHash = crypto.createHash('sha256').update(plainBody).digest('base64');
-        const sign = crypto.createSign('sha256');
-        sign.update(signHdrs.map(h => `${h}:${(req.body as any)[h] || ''}`).join('\r\n'));
-        const b = sign.sign(keyData.privateKey, 'base64');
-        const dkimSig = `DKIM-Signature: v=1; a=rsa-sha256; d=${customerDomain.domain}; s=${keyData.selector}; h=${hdrList}; bh=${bodyHash}; b=${b}\r\n`;
-        rawMessage = dkimSig + rawMessage;
+        const capture = nodemailer.createTransport({
+          streamTransport: true,
+          buffer: true,
+          newline: '\r\n',
+          dkim: { domainName: customerDomain.domain, keySelector: keyData.selector, privateKey: keyData.privateKey },
+        });
+        const info = await capture.sendMail({
+          from, to, subject,
+          text: plainBody,
+          messageId: msgId,
+          date: new Date(),
+        });
+        rawMessage = receivedHeader + (info.message as Buffer).toString('utf-8');
+        capture.close();
       }
     } catch {}
 
