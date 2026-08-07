@@ -33,6 +33,8 @@ const DEFAULT_SUBDOMAIN_COUNT = 24;
 const MAX_PORTAL_SUBDOMAIN_COUNT = 500;
 const DEFAULT_INDUSTRY = 'general';
 const DEFAULT_REGISTRAR = 'manual';
+const VALID_CREDENTIAL_TIERS = ['mass_mail', 'personal', 'transactional'] as const;
+type CredentialTier = typeof VALID_CREDENTIAL_TIERS[number];
 
 function parseSubdomainCount(value: unknown): number {
   const parsed = parseInt(String(value ?? DEFAULT_SUBDOMAIN_COUNT), 10);
@@ -42,6 +44,36 @@ function parseSubdomainCount(value: unknown): number {
 
 function normalizeNamingScheme(value: unknown): 'smtp' | 'mail' | 'outbound' | 'custom' {
   return ['smtp', 'mail', 'outbound', 'custom'].includes(String(value)) ? String(value) as any : 'smtp';
+}
+
+function normalizeCredentialTier(value: unknown): CredentialTier {
+  const raw = String(value || 'mass_mail').toLowerCase().replace(/-/g, '_');
+  return (VALID_CREDENTIAL_TIERS as readonly string[]).includes(raw) ? raw as CredentialTier : 'mass_mail';
+}
+
+function normalizeOptionalEmail(value: unknown): string | null {
+  const email = String(value || '').trim().toLowerCase();
+  if (!email) return null;
+  if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) return '';
+  return email;
+}
+
+function normalizeOptionalName(value: unknown): string | null {
+  const name = String(value || '').trim();
+  return name ? name.substring(0, 255) : null;
+}
+
+async function getVerifiedCredentialDomain(domainId: unknown, orgId: string): Promise<{ id: string; domain: string } | null> {
+  if (!domainId) return null;
+  const result = await query<{ id: string; domain: string }>(
+    'SELECT id, domain FROM customer_domains WHERE id = $1 AND organization_id = $2 AND verified = true',
+    [domainId, orgId]
+  );
+  return result.rows[0] || null;
+}
+
+function smtpPortForTier(tier: CredentialTier): number {
+  return config.platform.smtpPorts[tier] || config.platform.smtpPort;
 }
 
 async function ensurePoolDomain(rootDomain: string): Promise<{ id: string; domain: string; cloudflare_zone_id: string | null }> {
@@ -939,7 +971,8 @@ async function deliverVerificationEmail(domain: string, to: string, body: string
 router.get('/credentials', async (req: Request, res: Response) => {
   try {
     const result = await query(
-      `SELECT sc.id, sc.name, sc.username, sc.type, sc.hold, sc.last_used_at, sc.created_at,
+      `SELECT sc.id, sc.name, sc.username, sc.type, sc.tier, sc.hold,
+              sc.allowed_from_email, sc.default_from_name, sc.last_used_at, sc.created_at,
               cd.domain as domain_name
        FROM smtp_credentials sc
        LEFT JOIN customer_domains cd ON cd.id = sc.customer_domain_id
@@ -955,19 +988,33 @@ router.get('/credentials', async (req: Request, res: Response) => {
 
 router.post('/credentials', async (req: Request, res: Response) => {
   try {
-    const { name, domainId, type, hold } = req.body;
+    const { name, domainId, type, tier, hold, allowed_from_email, default_from_name } = req.body;
     if (!name) return res.status(400).json({ error: 'Credential name required' });
+
+    const orgId = req.user!.orgId!;
+    const credentialTier = normalizeCredentialTier(tier || type);
+    const allowedFromEmail = normalizeOptionalEmail(allowed_from_email);
+    const defaultFromName = normalizeOptionalName(default_from_name);
+    if (allowedFromEmail === '') return res.status(400).json({ error: 'Allowed From address is not a valid email address' });
+
+    const credentialDomain = await getVerifiedCredentialDomain(domainId, orgId);
+    if (domainId && !credentialDomain) {
+      return res.status(400).json({ error: 'Selected domain must be verified before it can be used for SMTP credentials' });
+    }
+    if (allowedFromEmail && credentialDomain && allowedFromEmail.split('@')[1] !== credentialDomain.domain.toLowerCase()) {
+      return res.status(400).json({ error: `Allowed From address must use ${credentialDomain.domain}` });
+    }
 
     const username = `u_${crypto.randomBytes(12).toString('hex')}`;
     const password = crypto.randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
     const hash = await require('bcryptjs').hash(password, 10);
-    const credType = (type || 'smtp-username').toLowerCase();
+    const credType = (type || 'smtp').toLowerCase();
 
     const result = await query<{ id: string }>(
-      `INSERT INTO smtp_credentials (organization_id, customer_domain_id, name, username, password_hash, type, hold)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO smtp_credentials (organization_id, customer_domain_id, name, username, password_hash, type, tier, allowed_from_email, default_from_name, hold)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
-      [req.user!.orgId!, domainId || null, name, username, hash, credType, hold === 'true' || hold === true]
+      [orgId, credentialDomain?.id || null, name, username, hash, credType, credentialTier, allowedFromEmail, defaultFromName, hold === 'true' || hold === true]
     );
 
     res.status(201).json({
@@ -976,6 +1023,12 @@ router.post('/credentials', async (req: Request, res: Response) => {
       username,
       password,
       type: credType,
+      tier: credentialTier,
+      smtp_host: config.dns.heloHostname,
+      smtp_port: smtpPortForTier(credentialTier),
+      domain_name: credentialDomain?.domain || null,
+      allowed_from_email: allowedFromEmail,
+      default_from_name: defaultFromName,
     });
   } catch (err) {
     console.error('Create credential error:', err);
@@ -985,11 +1038,27 @@ router.post('/credentials', async (req: Request, res: Response) => {
 
 router.put('/credentials/:id', async (req: Request, res: Response) => {
   try {
-    const { name, hold } = req.body;
+    const { name, hold, domainId, tier, allowed_from_email, default_from_name } = req.body;
     if (!name) return res.status(400).json({ error: 'Credential name required' });
+    const orgId = req.user!.orgId!;
+    const credentialTier = normalizeCredentialTier(tier);
+    const allowedFromEmail = normalizeOptionalEmail(allowed_from_email);
+    const defaultFromName = normalizeOptionalName(default_from_name);
+    if (allowedFromEmail === '') return res.status(400).json({ error: 'Allowed From address is not a valid email address' });
+
+    const credentialDomain = await getVerifiedCredentialDomain(domainId, orgId);
+    if (domainId && !credentialDomain) {
+      return res.status(400).json({ error: 'Selected domain must be verified before it can be used for SMTP credentials' });
+    }
+    if (allowedFromEmail && credentialDomain && allowedFromEmail.split('@')[1] !== credentialDomain.domain.toLowerCase()) {
+      return res.status(400).json({ error: `Allowed From address must use ${credentialDomain.domain}` });
+    }
+
     await query(
-      'UPDATE smtp_credentials SET name = $1, hold = $2 WHERE id = $3 AND organization_id = $4',
-      [name, hold === 'true' || hold === true, req.params.id, req.user!.orgId!]
+      `UPDATE smtp_credentials
+       SET name = $1, hold = $2, customer_domain_id = $3, tier = $4, allowed_from_email = $5, default_from_name = $6
+       WHERE id = $7 AND organization_id = $8`,
+      [name, hold === 'true' || hold === true, credentialDomain?.id || null, credentialTier, allowedFromEmail, defaultFromName, req.params.id, orgId]
     );
     res.json({ message: 'Credential saved' });
   } catch {
@@ -1000,7 +1069,11 @@ router.put('/credentials/:id', async (req: Request, res: Response) => {
 router.get('/credentials/:id', async (req: Request, res: Response) => {
   try {
     const result = await query(
-      'SELECT id, name, username, type, hold FROM smtp_credentials WHERE id = $1 AND organization_id = $2',
+      `SELECT sc.id, sc.name, sc.username, sc.type, sc.tier, sc.hold, sc.customer_domain_id,
+              sc.allowed_from_email, sc.default_from_name, cd.domain as domain_name
+       FROM smtp_credentials sc
+       LEFT JOIN customer_domains cd ON cd.id = sc.customer_domain_id
+       WHERE sc.id = $1 AND sc.organization_id = $2`,
       [req.params.id, req.user!.orgId!]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Credential not found' });
@@ -1417,7 +1490,7 @@ router.get('/settings', async (req: Request, res: Response) => {
     );
 
     const credentialResult = await query(
-      `SELECT name, username FROM smtp_credentials WHERE organization_id = $1 AND type = 'smtp' ORDER BY created_at DESC LIMIT 1`,
+      `SELECT name, username FROM smtp_credentials WHERE organization_id = $1 AND type LIKE 'smtp%' ORDER BY created_at DESC LIMIT 1`,
       [req.user!.orgId!]
     );
 

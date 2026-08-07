@@ -489,16 +489,18 @@ app.get('/portal/credentials/:id/edit', async (req, res) => {
   if (!token) return res.redirect('/login');
   try {
     const base = `http://localhost:${config.api.port}`;
-    const [userRes, credRes] = await Promise.all([
+    const [userRes, credRes, domainRes] = await Promise.all([
       fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
       fetch(`${base}/api/portal/credentials/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
     ]);
     if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
     if (credRes.status === 404) return res.redirect('/portal/credentials');
     const userData = await userRes.json();
     const credential = await credRes.json();
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
     const header = await fetchServerHeader(token);
-    res.render('add-credential', { layout: 'layout', ...header, credential, title: 'Edit Credential', active: 'credentials', email: userData.user?.email || '', token });
+    res.render('add-credential', { layout: 'layout', ...header, credential, domains: domainData.domains || [], title: 'Edit Credential', active: 'credentials', email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 

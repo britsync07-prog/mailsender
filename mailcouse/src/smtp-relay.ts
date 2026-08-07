@@ -10,12 +10,27 @@ import { config } from './config';
 import { getDomainDKIMPrivateKey } from './dkim/key-store';
 import { findVerifiedDomainForAddress } from './api/domain-logic';
 
+type SmtpCredentialUser = {
+  credentialId: string;
+  organizationId: string;
+  customerDomainId: string | null;
+  allowedFromEmail: string | null;
+  defaultFromName: string | null;
+};
+
 async function resolveMxIpv4(mxHost: string): Promise<string> {
   try {
     const addrs = await dns.promises.resolve4(mxHost);
     if (addrs.length > 0) return addrs[0];
   } catch {}
   return mxHost;
+}
+
+function formatAddressHeader(name: string | null | undefined, address: string): string {
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return address;
+  const escaped = cleanName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}" <${address}>`;
 }
 
 export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
@@ -42,8 +57,8 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
     async onAuth(auth: SMTPServerAuthentication, session: SMTPServerSession, callback: (err: Error | null | undefined, response?: SMTPServerAuthenticationResponse) => void) {
       try {
         if (!auth.username) return callback(new Error('Authentication failed'));
-        const result = await query<{ id: string; password_hash: string; organization_id: string; customer_domain_id: string; hold: boolean; tier: string }>(
-          `SELECT id, password_hash, organization_id, customer_domain_id, hold, tier
+        const result = await query<{ id: string; password_hash: string; organization_id: string; customer_domain_id: string | null; hold: boolean; tier: string; allowed_from_email: string | null; default_from_name: string | null }>(
+          `SELECT id, password_hash, organization_id, customer_domain_id, hold, tier, allowed_from_email, default_from_name
            FROM smtp_credentials WHERE username = $1`,
           [auth.username]
         );
@@ -58,7 +73,15 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
         if (!valid) return callback(new Error('Authentication failed'));
 
         await query('UPDATE smtp_credentials SET last_used_at = NOW() WHERE id = $1', [cred.id]);
-        callback(null, { user: { credentialId: cred.id, organizationId: cred.organization_id, customerDomainId: cred.customer_domain_id } });
+        callback(null, {
+          user: {
+            credentialId: cred.id,
+            organizationId: cred.organization_id,
+            customerDomainId: cred.customer_domain_id,
+            allowedFromEmail: cred.allowed_from_email,
+            defaultFromName: cred.default_from_name,
+          } as SmtpCredentialUser,
+        });
       } catch {
         callback(new Error('Authentication failed'));
       }
@@ -66,7 +89,7 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
 
     async onData(stream: SMTPServerDataStream, session: SMTPServerSession, callback: (err?: Error | null) => void) {
       try {
-        const authUser = (session as any).user;
+        const authUser = (session as any).user as SmtpCredentialUser | undefined;
         if (!authUser) return callback(new Error('Not authenticated'));
 
         const chunks: Buffer[] = [];
@@ -83,9 +106,17 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
         if (!customerDomain) {
           return callback(new Error(`530 From domain ${domainPart} is not verified for this account`));
         }
+        if (authUser.customerDomainId && customerDomain.id !== authUser.customerDomainId) {
+          return callback(new Error(`530 Credential is not allowed to send from ${domainPart}`));
+        }
+        if (authUser.allowedFromEmail && fromAddr.toLowerCase() !== authUser.allowedFromEmail.toLowerCase()) {
+          return callback(new Error(`530 Credential is only allowed to send from ${authUser.allowedFromEmail}`));
+        }
         const subject = parsed.subject || '(no subject)';
         const size = raw.length;
-        const headerFrom = parsed.from?.text || fromAddr;
+        const headerFrom = parsed.from?.value?.[0]?.name
+          ? (parsed.from?.text || fromAddr)
+          : formatAddressHeader(authUser.defaultFromName, fromAddr);
 
         const sdResult = await query<{ id: string; subdomain: string; root_domain: string; sender_name: string }>(
           `SELECT s.id, s.subdomain, d.domain as root_domain, s.sender_name

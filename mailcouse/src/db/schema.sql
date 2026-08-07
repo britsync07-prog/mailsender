@@ -517,6 +517,8 @@ CREATE TABLE IF NOT EXISTS smtp_credentials (
     type VARCHAR(20) NOT NULL DEFAULT 'smtp',
     hold BOOLEAN NOT NULL DEFAULT false,
     tier VARCHAR(20) NOT NULL DEFAULT 'mass_mail',
+    allowed_from_email VARCHAR(320),
+    default_from_name VARCHAR(255),
     last_used_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
