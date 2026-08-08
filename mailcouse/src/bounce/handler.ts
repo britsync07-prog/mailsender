@@ -3,8 +3,31 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { query, getPool } from '../db/connection';
+import { appendMessage, normalizeMailboxEmail } from '../imap/mailbox-store';
 
 const WARMUP_STORE = '/tmp/warmup_mail_store';
+
+async function deliverToLocalMailboxes(recipients: string[], rawEmail: string): Promise<number> {
+  let delivered = 0;
+  for (const recipient of recipients.map(normalizeMailboxEmail).filter(Boolean)) {
+    const result = await query<{ id: string }>(
+      `SELECT ma.id
+       FROM mailbox_accounts ma
+       WHERE LOWER(ma.email) = $1 AND ma.active = true
+       UNION
+       SELECT ma.id
+       FROM mailbox_aliases a
+       JOIN mailbox_accounts ma ON ma.id = a.mailbox_id
+       WHERE LOWER(a.address) = $1 AND a.active = true AND ma.active = true`,
+      [recipient]
+    );
+    for (const row of result.rows) {
+      await appendMessage({ mailboxId: row.id, folderName: 'INBOX', rawSource: rawEmail, flags: [] });
+      delivered++;
+    }
+  }
+  return delivered;
+}
 
 function classifyBounce(status: number | undefined, diagnostic: string | undefined): string {
   if (!status && !diagnostic) return 'unknown';
@@ -38,6 +61,20 @@ const server = new SMTPServer({
       const rawLower = rawEmail.toLowerCase();
       const toMatch = rawEmail.match(/^To:\s*(.+)$/im);
       const recipient = toMatch ? toMatch[1].trim().replace(/<|>/g, '').toLowerCase() : '';
+      const envelopeRecipients = (session.envelope.rcptTo || [])
+        .map((r: any) => typeof r === 'object' ? r.address : String(r || ''))
+        .filter(Boolean);
+      const localRecipients = envelopeRecipients.length > 0 ? envelopeRecipients : [recipient].filter(Boolean);
+
+      try {
+        const localDelivered = await deliverToLocalMailboxes(localRecipients, rawEmail);
+        if (localDelivered > 0) {
+          callback();
+          return;
+        }
+      } catch (err) {
+        console.error('Local mailbox delivery failed:', err);
+      }
 
       const isWarmup = await query(
         'SELECT id, mailbox_name FROM warmup_partners WHERE LOWER(email) = $1 AND status = $2',

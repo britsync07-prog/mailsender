@@ -1,0 +1,61 @@
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title"><%= mailbox.email %></p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok"><%= mailbox.imap_enabled ? 'IMAP enabled' : 'IMAP disabled' %></li>
+    </ul>
+  </div>
+</div>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/mailboxes" class="navBar__link is-active">Mailboxes</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+  </ul>
+</nav>
+<div class="pageContent pageContent--compact">
+  <p class="buttonSet">
+    <a href="/portal/mailboxes/<%= mailbox.id %>/edit" class="button">Edit mailbox</a>
+    <a href="/portal/mailboxes" class="button">All mailboxes</a>
+  </p>
+  <nav class="navBar navBar--secondary">
+    <ul>
+      <% folders.forEach(function(f) { %>
+        <li class="navBar__item"><a class="navBar__link <%= folder && folder.id === f.id ? 'is-active' : '' %>" href="/portal/mailboxes/<%= mailbox.id %>/messages?folder=<%= encodeURIComponent(f.name) %>"><%= f.name %></a></li>
+      <% }) %>
+    </ul>
+  </nav>
+  <% if (!messages || messages.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">No messages in <%= folder ? folder.name : 'this folder' %>.</h2>
+    </div>
+  <% } else { %>
+    <table class="table u-margin">
+      <thead>
+        <tr>
+          <th>UID</th>
+          <th>From</th>
+          <th>Subject</th>
+          <th>Flags</th>
+          <th>Date</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% messages.forEach(function(msg) { %>
+          <tr>
+            <td><%= msg.uid %></td>
+            <td><%= msg.from_text || '' %></td>
+            <td><%= msg.subject || '(no subject)' %></td>
+            <td><%= (msg.flags || []).join(' ') %></td>
+            <td><%= new Date(msg.internal_date).toLocaleString() %></td>
+            <td><a class="button button--small" href="/portal/mailboxes/<%= mailbox.id %>/messages/<%= msg.id %>/source">Source</a></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>

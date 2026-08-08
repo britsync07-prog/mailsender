@@ -20,6 +20,7 @@ import { getDashboardData } from './monitoring/dashboard';
 import { startCronRunner, stopCronRunner } from './cron/cron-runner';
 import trackingRoutes from './api/tracking-routes';
 import { startBounceHandler, stopBounceHandler } from './bounce/handler';
+import { createImapServer } from './imap/server';
 import fetch from 'node-fetch';
 
 const app = express();
@@ -504,6 +505,94 @@ app.get('/portal/credentials/:id/edit', async (req, res) => {
   } catch { res.redirect('/login'); }
 });
 
+app.get('/portal/mailboxes', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { mailboxes: [] };
+    const header = await fetchServerHeader(token);
+    res.render('mailboxes', { layout: 'layout', ...header, ...data, title: 'Mailboxes', active: 'mailboxes', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/mailboxes/add', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, domainRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/domains`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    const domainData = domainRes.ok ? await domainRes.json() : { domains: [] };
+    const header = await fetchServerHeader(token);
+    res.render('add-mailbox', { layout: 'layout', ...header, domains: domainData.domains || [], title: 'Add Mailbox', active: 'mailboxes', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/mailboxes/:id/edit', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, mailboxRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    if (mailboxRes.status === 404) return res.redirect('/portal/mailboxes');
+    const userData = await userRes.json();
+    const data = await mailboxRes.json();
+    const header = await fetchServerHeader(token);
+    res.render('add-mailbox', { layout: 'layout', ...header, ...data, title: 'Edit Mailbox', active: 'mailboxes', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/mailboxes/:id/messages', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const folderQuery = req.query.folder ? `?folder=${encodeURIComponent(String(req.query.folder))}` : '';
+    const [userRes, mailboxRes, dataRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes/${req.params.id}/messages${folderQuery}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    if (mailboxRes.status === 404) return res.redirect('/portal/mailboxes');
+    const userData = await userRes.json();
+    const mailboxData = await mailboxRes.json();
+    const data = dataRes.ok ? await dataRes.json() : { folders: [], folder: null, messages: [] };
+    const header = await fetchServerHeader(token);
+    res.render('mailbox-messages', { layout: 'layout', ...header, mailbox: mailboxData.mailbox, ...data, title: mailboxData.mailbox.email, active: 'mailboxes', email: userData.user?.email || '', token });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/mailboxes/:id/messages/:messageId/source', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const sourceRes = await fetch(`${base}/api/portal/mailboxes/${req.params.id}/messages/${req.params.messageId}/source`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!sourceRes.ok) return res.status(sourceRes.status).send(await sourceRes.text());
+    res.type('text/plain').send(await sourceRes.text());
+  } catch {
+    res.status(500).send('Failed to load source');
+  }
+});
+
 app.get('/portal/messages', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -930,6 +1019,7 @@ app.get('/portal/subdomains', async (req, res) => {
 // --- SMTP Relay Server ────────────────────────────────────
 import { createSmtpRelay } from './smtp-relay';
 const smtpServers: any[] = [];
+const imapServers: any[] = [];
 
 app.get('/portal/routes', async (req, res) => {
   const token = getToken(req);
@@ -1165,6 +1255,24 @@ async function start() {
       });
       smtpServers.push(server);
     });
+
+    if (config.platform.imapEnabled) {
+      const imapServer = createImapServer(false);
+      imapServer.listen(config.platform.imapPort, () => {
+        console.log(`IMAP server listening on port ${config.platform.imapPort}`);
+      });
+      imapServers.push(imapServer);
+
+      try {
+        const imapsServer = createImapServer(true);
+        imapsServer.listen(config.platform.imapsPort, () => {
+          console.log(`IMAPS server listening on port ${config.platform.imapsPort}`);
+        });
+        imapServers.push(imapsServer);
+      } catch (err: any) {
+        console.warn(`IMAPS disabled: ${err.message}`);
+      }
+    }
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
@@ -1187,6 +1295,10 @@ const shutdown = async (signal: string) => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     console.log(`SMTP relays stopped (${smtpServers.length} servers)`);
+    for (const server of imapServers) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    console.log(`IMAP servers stopped (${imapServers.length} servers)`);
     await closePool();
     console.log('Database pool closed');
     clearTimeout(timeout);

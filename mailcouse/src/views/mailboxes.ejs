@@ -1,0 +1,63 @@
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">IMAP mailboxes available</li>
+    </ul>
+  </div>
+</div>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/mailboxes" class="navBar__link is-active">Mailboxes</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+  </ul>
+</nav>
+<div class="pageContent pageContent--compact">
+  <% if (!mailboxes || mailboxes.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">There are no mailboxes for this server.</h2>
+      <p class="noData__text">Create a mailbox to receive and read mail through IMAP clients.</p>
+      <div class="noData__button"><a href="/portal/mailboxes/add" class="button button--positive">Add your first mailbox</a></div>
+    </div>
+  <% } else { %>
+    <p class="pageContent__intro u-margin">Mailboxes provide IMAP access for users and applications. SMTP sending credentials remain separate.</p>
+    <ul class="credentialList u-margin">
+      <% mailboxes.forEach(function(m) { %>
+        <li class="credentialList__item">
+          <a href="/portal/mailboxes/<%= m.id %>/messages" class="credentialList__link">
+            <div class="credentialList__type">
+              <span class="label"><%= m.imap_enabled ? 'IMAP' : 'OFF' %></span>
+            </div>
+            <div class="credentialList__properties">
+              <p class="credentialList__name">
+                <%= m.display_name || m.email %>
+                <% if (!m.active) { %><span class="label label--red">Suspended</span><% } %>
+              </p>
+              <p class="credentialList__key"><%= m.email %></p>
+              <p class="credentialList__key"><%= m.message_count %> messages - <%= m.unread_count %> unread - <%= Math.round((m.storage_bytes || 0) / 1024) %> KB</p>
+            </div>
+            <div class="credentialList__usedAt credentialList__usedAt--<%= m.last_login_at ? 'active' : 'inactive' %>">
+              <% if (m.last_login_at) { %>
+                <p class="credentialList__usedAtTitle">Active</p>
+                <p>Login <%= timeAgo(m.last_login_at) %></p>
+              <% } else { %>
+                <p>Not logged in yet</p>
+              <% } %>
+            </div>
+          </a>
+          <p class="u-center buttonSet buttonSet--center">
+            <a href="/portal/mailboxes/<%= m.id %>/edit" class="button button--small">Edit</a>
+          </p>
+        </li>
+      <% }) %>
+    </ul>
+    <p class="u-center buttonSet buttonSet--center"><a href="/portal/mailboxes/add" class="button button--positive">Add another mailbox</a></p>
+  <% } %>
+</div>

@@ -25,6 +25,15 @@ import {
 import crypto from 'crypto';
 import * as dns from 'dns';
 import nodemailer from 'nodemailer';
+import {
+  createMailboxAccount,
+  ensureDefaultFolders,
+  isValidMailboxEmail,
+  listFolders,
+  listMessages,
+  normalizeMailboxEmail,
+  updateMailboxAccount,
+} from '../imap/mailbox-store';
 
 const router = Router();
 router.use(authenticate);
@@ -74,6 +83,33 @@ async function getVerifiedCredentialDomain(domainId: unknown, orgId: string): Pr
 
 function smtpPortForTier(tier: CredentialTier): number {
   return config.platform.smtpPorts[tier] || config.platform.smtpPort;
+}
+
+function normalizeAliasList(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : String(value || '').split(/[\n,]/);
+  return Array.from(new Set(raw.map((item) => normalizeMailboxEmail(String(item))).filter(Boolean)));
+}
+
+async function validateMailboxAddresses(addresses: string[], orgId: string): Promise<string | null> {
+  for (const address of addresses) {
+    if (!isValidMailboxEmail(address)) return `${address} is not a valid email address`;
+    const domainPart = address.split('@')[1];
+    const domain = await findVerifiedDomainForAddress(domainPart, orgId);
+    if (!domain || domain.domain.toLowerCase() !== domainPart) return `Domain ${domainPart} must be verified before using ${address}`;
+  }
+  return null;
+}
+
+async function syncMailboxAliases(mailboxId: string, orgId: string, aliases: string[]): Promise<void> {
+  await query('DELETE FROM mailbox_aliases WHERE mailbox_id = $1 AND organization_id = $2', [mailboxId, orgId]);
+  for (const alias of aliases) {
+    await query(
+      `INSERT INTO mailbox_aliases (organization_id, mailbox_id, address, active)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT (organization_id, address) DO UPDATE SET mailbox_id = EXCLUDED.mailbox_id, active = true`,
+      [orgId, mailboxId, alias]
+    );
+  }
 }
 
 async function ensurePoolDomain(rootDomain: string): Promise<{ id: string; domain: string; cloudflare_zone_id: string | null }> {
@@ -1109,6 +1145,149 @@ router.delete('/credentials/:id', async (req: Request, res: Response) => {
 });
 
 // ─── Subdomains ───────────────────────────────────────────
+
+// IMAP Mailboxes
+
+router.get('/mailboxes', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT ma.id, ma.email, ma.display_name, ma.quota_mb, ma.active, ma.imap_enabled,
+              ma.last_login_at, ma.created_at, cd.domain as domain_name,
+              COALESCE(COUNT(mm.id), 0)::int as message_count,
+              COALESCE(SUM(mm.size), 0)::int as storage_bytes,
+              COALESCE(COUNT(mm.id) FILTER (WHERE NOT (mm.flags @> ARRAY['\\Seen']::TEXT[])), 0)::int as unread_count
+       FROM mailbox_accounts ma
+       LEFT JOIN customer_domains cd ON cd.id = ma.customer_domain_id
+       LEFT JOIN mailbox_messages mm ON mm.mailbox_id = ma.id
+       WHERE ma.organization_id = $1
+       GROUP BY ma.id, cd.domain
+       ORDER BY ma.created_at DESC`,
+      [req.user!.orgId!]
+    );
+    res.json({ mailboxes: result.rows });
+  } catch (err) {
+    console.error('List mailboxes error:', err);
+    res.status(500).json({ error: 'Failed to list mailboxes' });
+  }
+});
+
+router.post('/mailboxes', async (req: Request, res: Response) => {
+  try {
+    const { email, display_name, password, quota_mb, active, imap_enabled, aliases } = req.body;
+    const normalizedEmail = normalizeMailboxEmail(email);
+    if (!isValidMailboxEmail(normalizedEmail)) return res.status(400).json({ error: 'Valid mailbox email required' });
+    if (!password || String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const domainPart = normalizedEmail.split('@')[1];
+    const domain = await findVerifiedDomainForAddress(domainPart, req.user!.orgId!);
+    if (!domain || domain.domain.toLowerCase() !== domainPart) {
+      return res.status(400).json({ error: `Domain ${domainPart} must be verified before creating mailboxes` });
+    }
+    const aliasList = normalizeAliasList(aliases).filter((alias) => alias !== normalizedEmail);
+    const aliasError = await validateMailboxAddresses(aliasList, req.user!.orgId!);
+    if (aliasError) return res.status(400).json({ error: aliasError });
+
+    const mailbox = await createMailboxAccount({
+      orgId: req.user!.orgId!,
+      customerDomainId: domain.id,
+      email: normalizedEmail,
+      displayName: display_name,
+      password,
+      quotaMb: quota_mb ? parseInt(String(quota_mb), 10) : 1024,
+      active: active !== 'false' && active !== false,
+      imapEnabled: imap_enabled !== 'false' && imap_enabled !== false,
+    });
+    await syncMailboxAliases(mailbox.id, req.user!.orgId!, aliasList);
+    res.status(201).json({ id: mailbox.id, email: normalizedEmail });
+  } catch (err: any) {
+    console.error('Create mailbox error:', err);
+    res.status(500).json({ error: err?.code === '23505' ? 'Mailbox already exists' : 'Failed to create mailbox' });
+  }
+});
+
+router.get('/mailboxes/:id', async (req: Request, res: Response) => {
+  try {
+    const mailboxId = String(req.params.id);
+    const result = await query(
+      `SELECT ma.id, ma.customer_domain_id, ma.email, ma.display_name, ma.quota_mb, ma.active, ma.imap_enabled,
+              ma.last_login_at, ma.created_at, cd.domain as domain_name
+       FROM mailbox_accounts ma
+       LEFT JOIN customer_domains cd ON cd.id = ma.customer_domain_id
+       WHERE ma.id = $1 AND ma.organization_id = $2`,
+      [mailboxId, req.user!.orgId!]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Mailbox not found' });
+    await ensureDefaultFolders(mailboxId);
+    const folders = await listFolders(mailboxId);
+    const aliases = await query('SELECT id, address, active FROM mailbox_aliases WHERE mailbox_id = $1 AND organization_id = $2 ORDER BY address', [mailboxId, req.user!.orgId!]);
+    res.json({ mailbox: result.rows[0], folders, aliases: aliases.rows });
+  } catch {
+    res.status(500).json({ error: 'Failed to load mailbox' });
+  }
+});
+
+router.put('/mailboxes/:id', async (req: Request, res: Response) => {
+  try {
+    const mailboxId = String(req.params.id);
+    const exists = await query('SELECT id FROM mailbox_accounts WHERE id = $1 AND organization_id = $2', [mailboxId, req.user!.orgId!]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: 'Mailbox not found' });
+    const aliasList = normalizeAliasList(req.body.aliases).filter((alias) => alias !== normalizeMailboxEmail(req.body.email || ''));
+    const aliasError = await validateMailboxAddresses(aliasList, req.user!.orgId!);
+    if (aliasError) return res.status(400).json({ error: aliasError });
+    await updateMailboxAccount({
+      id: mailboxId,
+      orgId: req.user!.orgId!,
+      displayName: req.body.display_name,
+      password: req.body.password || null,
+      quotaMb: req.body.quota_mb ? parseInt(String(req.body.quota_mb), 10) : 1024,
+      active: req.body.active !== 'false' && req.body.active !== false,
+      imapEnabled: req.body.imap_enabled !== 'false' && req.body.imap_enabled !== false,
+    });
+    await syncMailboxAliases(mailboxId, req.user!.orgId!, aliasList);
+    res.json({ message: 'Mailbox saved' });
+  } catch {
+    res.status(500).json({ error: 'Failed to save mailbox' });
+  }
+});
+
+router.delete('/mailboxes/:id', async (req: Request, res: Response) => {
+  try {
+    await query('DELETE FROM mailbox_accounts WHERE id = $1 AND organization_id = $2', [String(req.params.id), req.user!.orgId!]);
+    res.json({ message: 'Mailbox deleted' });
+  } catch {
+    res.status(500).json({ error: 'Failed to delete mailbox' });
+  }
+});
+
+router.get('/mailboxes/:id/messages', async (req: Request, res: Response) => {
+  try {
+    const mailboxId = String(req.params.id);
+    const mailbox = await query('SELECT id FROM mailbox_accounts WHERE id = $1 AND organization_id = $2', [mailboxId, req.user!.orgId!]);
+    if (mailbox.rows.length === 0) return res.status(404).json({ error: 'Mailbox not found' });
+    const folders = await listFolders(mailboxId);
+    const folder = folders.find((f) => f.name.toLowerCase() === String(req.query.folder || 'INBOX').toLowerCase()) || folders[0];
+    const messages = folder ? await listMessages(folder.id, 100) : [];
+    res.json({ folders, folder, messages });
+  } catch {
+    res.status(500).json({ error: 'Failed to list mailbox messages' });
+  }
+});
+
+router.get('/mailboxes/:id/messages/:messageId/source', async (req: Request, res: Response) => {
+  try {
+    const result = await query<{ raw_source: string }>(
+      `SELECT mm.raw_source
+       FROM mailbox_messages mm
+       JOIN mailbox_accounts ma ON ma.id = mm.mailbox_id
+       WHERE ma.id = $1 AND ma.organization_id = $2 AND mm.id = $3`,
+      [String(req.params.id), req.user!.orgId!, String(req.params.messageId)]
+    );
+    if (result.rows.length === 0) return res.status(404).send('Message not found');
+    res.type('text/plain').send(result.rows[0].raw_source);
+  } catch {
+    res.status(500).send('Failed to load source');
+  }
+});
 
 router.get('/subdomains', async (req: Request, res: Response) => {
   try {

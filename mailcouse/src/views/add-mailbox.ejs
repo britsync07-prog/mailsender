@@ -1,0 +1,122 @@
+<div class="serverHeader">
+  <div class="serverHeader__stripe serverHeader__stripe--<%= serverMode %>"><%= serverMode.charAt(0).toUpperCase() + serverMode.slice(1) %></div>
+  <div class="serverHeader__info">
+    <p class="serverHeader__title">Mail Server</p>
+    <ul class="serverHeader__list">
+      <li class="serverHeader__list--ok">IMAP mailbox configuration</li>
+    </ul>
+  </div>
+</div>
+<nav class="navBar">
+  <ul>
+    <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/mailboxes" class="navBar__link is-active">Mailboxes</a></li>
+    <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
+    <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
+    <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
+    <li class="navBar__item"><a href="/portal/webhooks" class="navBar__link">Webhooks</a></li>
+    <li class="navBar__item"><a href="/portal/settings" class="navBar__link">Settings</a></li>
+  </ul>
+</nav>
+<div class="pageContent pageContent--compact">
+  <% var m = typeof mailbox !== 'undefined' ? mailbox : null; %>
+  <% var availableDomains = typeof domains !== 'undefined' ? domains : []; %>
+  <% var aliasText = typeof aliases !== 'undefined' && aliases ? aliases.map(function(a) { return a.address; }).join('\n') : ''; %>
+  <form id="mailbox-form" onsubmit="saveMailbox(event)">
+    <fieldset class="fieldSet">
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Email address</label>
+        <div class="fieldSet__input">
+          <input type="email" id="mailbox-email" class="input input--text input--code" value="<%= m ? m.email : '' %>" <%= m ? 'disabled' : 'autofocus' %>>
+          <p class="fieldSet__text">The domain must already be verified in this organization.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Display name</label>
+        <div class="fieldSet__input">
+          <input type="text" id="mailbox-name" class="input input--text" value="<%= m && m.display_name ? m.display_name : '' %>">
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Password</label>
+        <div class="fieldSet__input">
+          <input type="password" id="mailbox-password" class="input input--text" placeholder="<%= m ? 'Leave blank to keep current password' : 'At least 8 characters' %>">
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Quota</label>
+        <div class="fieldSet__input">
+          <input type="number" id="mailbox-quota" class="input input--text" min="1" value="<%= m ? m.quota_mb : 1024 %>">
+          <p class="fieldSet__text">Mailbox storage limit in MB.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Aliases</label>
+        <div class="fieldSet__input">
+          <textarea id="mailbox-aliases" class="input input--text" rows="4" placeholder="sales@example.com&#10;support@example.com"><%= aliasText %></textarea>
+          <p class="fieldSet__text">Optional alternate recipient addresses for this mailbox, one per line.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">Status</label>
+        <div class="fieldSet__input">
+          <select id="mailbox-active" class="input input--select">
+            <option value="true" <%= !m || m.active ? 'selected' : '' %>>Active</option>
+            <option value="false" <%= m && !m.active ? 'selected' : '' %>>Suspended</option>
+          </select>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">IMAP</label>
+        <div class="fieldSet__input">
+          <select id="mailbox-imap" class="input input--select">
+            <option value="true" <%= !m || m.imap_enabled ? 'selected' : '' %>>Enabled</option>
+            <option value="false" <%= m && !m.imap_enabled ? 'selected' : '' %>>Disabled</option>
+          </select>
+        </div>
+      </div>
+    </fieldset>
+    <div class="fieldSetSubmit buttonSet">
+      <button type="submit" class="button button--positive js-form-submit"><%= m ? 'Save mailbox' : 'Create mailbox' %></button>
+      <% if (m) { %>
+        <span class="fieldSetSubmit__delete"><a href="javascript:deleteMailbox()" class="button button--danger">Delete mailbox</a></span>
+      <% } %>
+    </div>
+  </form>
+</div>
+<script>
+async function saveMailbox(e) {
+  e.preventDefault();
+  var btn = document.querySelector('#mailbox-form .js-form-submit');
+  btn.textContent = 'Saving...'; btn.disabled = true;
+  try {
+    var body = {
+      email: document.getElementById('mailbox-email').value,
+      display_name: document.getElementById('mailbox-name').value,
+      password: document.getElementById('mailbox-password').value,
+      quota_mb: document.getElementById('mailbox-quota').value,
+      aliases: document.getElementById('mailbox-aliases').value,
+      active: document.getElementById('mailbox-active').value,
+      imap_enabled: document.getElementById('mailbox-imap').value
+    };
+    var r = await fetch('<%= m ? "/api/portal/mailboxes/" + m.id : "/api/portal/mailboxes" %>', {
+      method: '<%= m ? "PUT" : "POST" %>',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer <%= token %>'},
+      body: JSON.stringify(body)
+    });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed to save mailbox');
+    location.href = '<%= m ? "/portal/mailboxes/" + m.id + "/messages" : "/portal/mailboxes" %>';
+  } catch (err) {
+    alert('Error: ' + err.message);
+    btn.textContent = '<%= m ? "Save mailbox" : "Create mailbox" %>';
+    btn.disabled = false;
+  }
+}
+async function deleteMailbox() {
+  if (!confirm('Delete this mailbox and all stored messages?')) return;
+  await fetch('<%= m ? "/api/portal/mailboxes/" + m.id : "" %>', { method:'DELETE', headers:{'Authorization':'Bearer <%= token %>'} });
+  location.href = '/portal/mailboxes';
+}
+</script>

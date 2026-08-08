@@ -122,6 +122,9 @@ export const config = {
       personal: parseInt(process.env.SMTP_PORT_PERSONAL || '588'),
       transactional: parseInt(process.env.SMTP_PORT_TRANSACTIONAL || '589'),
     },
+    imapEnabled: process.env.IMAP_ENABLED !== 'false',
+    imapPort: parseInt(process.env.IMAP_PORT || '143'),
+    imapsPort: parseInt(process.env.IMAPS_PORT || '993'),
   },
 
   // DNS settings (Postal Config.dns equivalent)
