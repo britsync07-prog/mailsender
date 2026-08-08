@@ -539,6 +539,8 @@ CREATE TABLE IF NOT EXISTS mailbox_accounts (
     quota_mb INTEGER NOT NULL DEFAULT 1024,
     active BOOLEAN NOT NULL DEFAULT true,
     imap_enabled BOOLEAN NOT NULL DEFAULT true,
+    smtp_enabled BOOLEAN NOT NULL DEFAULT true,
+    smtp_tier VARCHAR(20) NOT NULL DEFAULT 'personal',
     last_login_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE(organization_id, email)

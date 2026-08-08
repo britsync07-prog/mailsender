@@ -11,6 +11,8 @@ export type MailboxAccount = {
   quota_mb: number;
   active: boolean;
   imap_enabled: boolean;
+  smtp_enabled: boolean;
+  smtp_tier: string;
 };
 
 export type MailboxFolder = {
@@ -81,13 +83,15 @@ export async function createMailboxAccount(input: {
   quotaMb?: number;
   active?: boolean;
   imapEnabled?: boolean;
+  smtpEnabled?: boolean;
+  smtpTier?: string;
 }): Promise<{ id: string }> {
   const email = normalizeMailboxEmail(input.email);
   const hash = await bcrypt.hash(input.password, 10);
   const result = await query<{ id: string }>(
     `INSERT INTO mailbox_accounts
-       (organization_id, customer_domain_id, email, display_name, password_hash, quota_mb, active, imap_enabled)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (organization_id, customer_domain_id, email, display_name, password_hash, quota_mb, active, imap_enabled, smtp_enabled, smtp_tier)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING id`,
     [
       input.orgId,
@@ -98,6 +102,8 @@ export async function createMailboxAccount(input: {
       input.quotaMb || 1024,
       input.active !== false,
       input.imapEnabled !== false,
+      input.smtpEnabled !== false,
+      input.smtpTier || 'personal',
     ]
   );
   await ensureDefaultFolders(result.rows[0].id);
@@ -112,6 +118,8 @@ export async function updateMailboxAccount(input: {
   quotaMb?: number;
   active?: boolean;
   imapEnabled?: boolean;
+  smtpEnabled?: boolean;
+  smtpTier?: string;
 }): Promise<void> {
   const hash = input.password ? await bcrypt.hash(input.password, 10) : null;
   await query(
@@ -120,13 +128,17 @@ export async function updateMailboxAccount(input: {
          quota_mb = $2,
          active = $3,
          imap_enabled = $4,
-         password_hash = COALESCE($5, password_hash)
-     WHERE id = $6 AND organization_id = $7`,
+         smtp_enabled = $5,
+         smtp_tier = $6,
+         password_hash = COALESCE($7, password_hash)
+     WHERE id = $8 AND organization_id = $9`,
     [
       input.displayName || null,
       input.quotaMb || 1024,
       input.active !== false,
       input.imapEnabled !== false,
+      input.smtpEnabled !== false,
+      input.smtpTier || 'personal',
       hash,
       input.id,
       input.orgId,
@@ -138,7 +150,7 @@ export async function updateMailboxAccount(input: {
 export async function authenticateMailbox(emailInput: string, password: string, remoteAddr?: string): Promise<MailboxAccount | null> {
   const email = normalizeMailboxEmail(emailInput);
   const result = await query<MailboxAccount & { password_hash: string }>(
-    `SELECT id, organization_id, customer_domain_id, email, display_name, quota_mb, active, imap_enabled, password_hash
+    `SELECT id, organization_id, customer_domain_id, email, display_name, quota_mb, active, imap_enabled, smtp_enabled, smtp_tier, password_hash
      FROM mailbox_accounts
      WHERE LOWER(email) = $1`,
     [email]

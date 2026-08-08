@@ -33,7 +33,8 @@
         <li class="credentialList__item">
           <a href="/portal/mailboxes/<%= m.id %>/messages" class="credentialList__link">
             <div class="credentialList__type">
-              <span class="label"><%= m.imap_enabled ? 'IMAP' : 'OFF' %></span>
+              <span class="label"><%= m.imap_enabled ? 'IMAP' : 'NO IMAP' %></span>
+              <span class="label"><%= m.smtp_enabled ? 'SMTP' : 'NO SMTP' %></span>
             </div>
             <div class="credentialList__properties">
               <p class="credentialList__name">
@@ -41,7 +42,7 @@
                 <% if (!m.active) { %><span class="label label--red">Suspended</span><% } %>
               </p>
               <p class="credentialList__key"><%= m.email %></p>
-              <p class="credentialList__key"><%= m.message_count %> messages - <%= m.unread_count %> unread - <%= Math.round((m.storage_bytes || 0) / 1024) %> KB</p>
+              <p class="credentialList__key"><%= m.message_count %> messages - <%= m.unread_count %> unread - <%= Math.round((m.storage_bytes || 0) / 1024) %> KB - <%= m.smtp_tier || 'personal' %></p>
             </div>
             <div class="credentialList__usedAt credentialList__usedAt--<%= m.last_login_at ? 'active' : 'inactive' %>">
               <% if (m.last_login_at) { %>

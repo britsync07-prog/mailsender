@@ -1152,7 +1152,7 @@ router.get('/mailboxes', async (req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT ma.id, ma.email, ma.display_name, ma.quota_mb, ma.active, ma.imap_enabled,
-              ma.last_login_at, ma.created_at, cd.domain as domain_name,
+              ma.smtp_enabled, ma.smtp_tier, ma.last_login_at, ma.created_at, cd.domain as domain_name,
               COALESCE(COUNT(mm.id), 0)::int as message_count,
               COALESCE(SUM(mm.size), 0)::int as storage_bytes,
               COALESCE(COUNT(mm.id) FILTER (WHERE NOT (mm.flags @> ARRAY['\\Seen']::TEXT[])), 0)::int as unread_count
@@ -1173,7 +1173,7 @@ router.get('/mailboxes', async (req: Request, res: Response) => {
 
 router.post('/mailboxes', async (req: Request, res: Response) => {
   try {
-    const { email, display_name, password, quota_mb, active, imap_enabled, aliases } = req.body;
+    const { email, display_name, password, quota_mb, active, imap_enabled, smtp_enabled, smtp_tier, aliases } = req.body;
     const normalizedEmail = normalizeMailboxEmail(email);
     if (!isValidMailboxEmail(normalizedEmail)) return res.status(400).json({ error: 'Valid mailbox email required' });
     if (!password || String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
@@ -1196,6 +1196,8 @@ router.post('/mailboxes', async (req: Request, res: Response) => {
       quotaMb: quota_mb ? parseInt(String(quota_mb), 10) : 1024,
       active: active !== 'false' && active !== false,
       imapEnabled: imap_enabled !== 'false' && imap_enabled !== false,
+      smtpEnabled: smtp_enabled !== 'false' && smtp_enabled !== false,
+      smtpTier: normalizeCredentialTier(smtp_tier),
     });
     await syncMailboxAliases(mailbox.id, req.user!.orgId!, aliasList);
     res.status(201).json({ id: mailbox.id, email: normalizedEmail });
@@ -1210,7 +1212,7 @@ router.get('/mailboxes/:id', async (req: Request, res: Response) => {
     const mailboxId = String(req.params.id);
     const result = await query(
       `SELECT ma.id, ma.customer_domain_id, ma.email, ma.display_name, ma.quota_mb, ma.active, ma.imap_enabled,
-              ma.last_login_at, ma.created_at, cd.domain as domain_name
+              ma.smtp_enabled, ma.smtp_tier, ma.last_login_at, ma.created_at, cd.domain as domain_name
        FROM mailbox_accounts ma
        LEFT JOIN customer_domains cd ON cd.id = ma.customer_domain_id
        WHERE ma.id = $1 AND ma.organization_id = $2`,
@@ -1242,6 +1244,8 @@ router.put('/mailboxes/:id', async (req: Request, res: Response) => {
       quotaMb: req.body.quota_mb ? parseInt(String(req.body.quota_mb), 10) : 1024,
       active: req.body.active !== 'false' && req.body.active !== false,
       imapEnabled: req.body.imap_enabled !== 'false' && req.body.imap_enabled !== false,
+      smtpEnabled: req.body.smtp_enabled !== 'false' && req.body.smtp_enabled !== false,
+      smtpTier: normalizeCredentialTier(req.body.smtp_tier),
     });
     await syncMailboxAliases(mailboxId, req.user!.orgId!, aliasList);
     res.json({ message: 'Mailbox saved' });

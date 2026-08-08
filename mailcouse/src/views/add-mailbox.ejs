@@ -74,6 +74,28 @@
             <option value="true" <%= !m || m.imap_enabled ? 'selected' : '' %>>Enabled</option>
             <option value="false" <%= m && !m.imap_enabled ? 'selected' : '' %>>Disabled</option>
           </select>
+          <p class="fieldSet__text">Allows this mailbox password to read incoming mail over IMAP.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">SMTP</label>
+        <div class="fieldSet__input">
+          <select id="mailbox-smtp" class="input input--select">
+            <option value="true" <%= !m || m.smtp_enabled ? 'selected' : '' %>>Enabled</option>
+            <option value="false" <%= m && !m.smtp_enabled ? 'selected' : '' %>>Disabled</option>
+          </select>
+          <p class="fieldSet__text">Allows this same mailbox email and password to send outgoing mail over SMTP.</p>
+        </div>
+      </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label">SMTP Port</label>
+        <div class="fieldSet__input">
+          <select id="mailbox-smtp-tier" class="input input--select">
+            <option value="personal" <%= !m || m.smtp_tier === 'personal' ? 'selected' : '' %>>Personal</option>
+            <option value="mass_mail" <%= m && m.smtp_tier === 'mass_mail' ? 'selected' : '' %>>Mass mail</option>
+            <option value="transactional" <%= m && m.smtp_tier === 'transactional' ? 'selected' : '' %>>Transactional</option>
+          </select>
+          <p class="fieldSet__text">The mailbox can authenticate only on the matching SMTP port.</p>
         </div>
       </div>
     </fieldset>
@@ -98,7 +120,9 @@ async function saveMailbox(e) {
       quota_mb: document.getElementById('mailbox-quota').value,
       aliases: document.getElementById('mailbox-aliases').value,
       active: document.getElementById('mailbox-active').value,
-      imap_enabled: document.getElementById('mailbox-imap').value
+      imap_enabled: document.getElementById('mailbox-imap').value,
+      smtp_enabled: document.getElementById('mailbox-smtp').value,
+      smtp_tier: document.getElementById('mailbox-smtp-tier').value
     };
     var r = await fetch('<%= m ? "/api/portal/mailboxes/" + m.id : "/api/portal/mailboxes" %>', {
       method: '<%= m ? "PUT" : "POST" %>',

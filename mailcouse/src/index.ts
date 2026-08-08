@@ -574,7 +574,20 @@ app.get('/portal/mailboxes/:id/messages', async (req, res) => {
     const mailboxData = await mailboxRes.json();
     const data = dataRes.ok ? await dataRes.json() : { folders: [], folder: null, messages: [] };
     const header = await fetchServerHeader(token);
-    res.render('mailbox-messages', { layout: 'layout', ...header, mailbox: mailboxData.mailbox, ...data, title: mailboxData.mailbox.email, active: 'mailboxes', email: userData.user?.email || '', token });
+    res.render('mailbox-messages', {
+      layout: 'layout',
+      ...header,
+      mailbox: mailboxData.mailbox,
+      ...data,
+      title: mailboxData.mailbox.email,
+      active: 'mailboxes',
+      email: userData.user?.email || '',
+      token,
+      smtpHost: config.dns.heloHostname,
+      smtpPorts: config.platform.smtpPorts,
+      imapPort: config.platform.imapPort,
+      imapsPort: config.platform.imapsPort,
+    });
   } catch { res.redirect('/login'); }
 });
 

@@ -21,6 +21,17 @@
     <a href="/portal/mailboxes/<%= mailbox.id %>/edit" class="button">Edit mailbox</a>
     <a href="/portal/mailboxes" class="button">All mailboxes</a>
   </p>
+  <dl class="pageContent__definitions u-margin">
+    <dt>Username</dt>
+    <dd><p class="pageContent__definitionCode"><%= mailbox.email %></p></dd>
+    <dt>Incoming IMAP</dt>
+    <dd><p class="pageContent__definitionCode"><%= smtpHost %>:<%= imapsPort %> SSL/TLS or <%= smtpHost %>:<%= imapPort %> STARTTLS</p></dd>
+    <dt>Outgoing SMTP</dt>
+    <dd>
+      <p class="pageContent__definitionCode"><%= smtpHost %>:<%= smtpPorts[mailbox.smtp_tier || 'personal'] %> STARTTLS</p>
+      <p class="pageContent__definitionText">Use this mailbox email and password for both incoming and outgoing mail.</p>
+    </dd>
+  </dl>
   <nav class="navBar navBar--secondary">
     <ul>
       <% folders.forEach(function(f) { %>

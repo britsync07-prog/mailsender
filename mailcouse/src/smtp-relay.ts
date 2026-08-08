@@ -11,7 +11,8 @@ import { getDomainDKIMPrivateKey } from './dkim/key-store';
 import { findVerifiedDomainForAddress } from './api/domain-logic';
 
 type SmtpCredentialUser = {
-  credentialId: string;
+  credentialId: string | null;
+  mailboxId?: string | null;
   organizationId: string;
   customerDomainId: string | null;
   allowedFromEmail: string | null;
@@ -63,23 +64,76 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
           [auth.username]
         );
 
-        if (result.rows.length === 0) return callback(new Error('Authentication failed'));
-        const cred = result.rows[0];
-        if (cred.hold) return callback(new Error('Credential is on hold'));
+        if (result.rows.length > 0) {
+          const cred = result.rows[0];
+          if (cred.hold) return callback(new Error('Credential is on hold'));
 
-        if (cred.tier && cred.tier !== tier) return callback(new Error(`Credential not allowed on this port (requires ${cred.tier} port)`));
+          if (cred.tier && cred.tier !== tier) return callback(new Error(`Credential not allowed on this port (requires ${cred.tier} port)`));
 
-        const valid = await bcrypt.compare(auth.password || '', cred.password_hash);
-        if (!valid) return callback(new Error('Authentication failed'));
+          const valid = await bcrypt.compare(auth.password || '', cred.password_hash);
+          if (!valid) return callback(new Error('Authentication failed'));
 
-        await query('UPDATE smtp_credentials SET last_used_at = NOW() WHERE id = $1', [cred.id]);
-        callback(null, {
+          await query('UPDATE smtp_credentials SET last_used_at = NOW() WHERE id = $1', [cred.id]);
+          return callback(null, {
+            user: {
+              credentialId: cred.id,
+              mailboxId: null,
+              organizationId: cred.organization_id,
+              customerDomainId: cred.customer_domain_id,
+              allowedFromEmail: cred.allowed_from_email,
+              defaultFromName: cred.default_from_name,
+            } as SmtpCredentialUser,
+          });
+        }
+
+        const mailboxResult = await query<{ id: string; password_hash: string; organization_id: string; customer_domain_id: string | null; email: string; display_name: string | null; active: boolean; smtp_enabled: boolean; smtp_tier: string }>(
+          `SELECT id, password_hash, organization_id, customer_domain_id, email, display_name, active, smtp_enabled, smtp_tier
+           FROM mailbox_accounts WHERE LOWER(email) = LOWER($1)`,
+          [auth.username]
+        );
+        if (mailboxResult.rows.length === 0) return callback(new Error('Authentication failed'));
+        const mailbox = mailboxResult.rows[0];
+        if (!mailbox.active || !mailbox.smtp_enabled) {
+          await query(
+            `INSERT INTO mailbox_auth_logs (mailbox_id, email, protocol, remote_addr, success, details)
+             VALUES ($1, $2, 'smtp', $3, false, $4)`,
+            [mailbox.id, mailbox.email, session.remoteAddress || null, 'Mailbox SMTP access is disabled']
+          );
+          return callback(new Error('Mailbox SMTP access is disabled'));
+        }
+        if (mailbox.smtp_tier && mailbox.smtp_tier !== tier) {
+          await query(
+            `INSERT INTO mailbox_auth_logs (mailbox_id, email, protocol, remote_addr, success, details)
+             VALUES ($1, $2, 'smtp', $3, false, $4)`,
+            [mailbox.id, mailbox.email, session.remoteAddress || null, `Wrong SMTP port for mailbox; requires ${mailbox.smtp_tier}`]
+          );
+          return callback(new Error(`Mailbox not allowed on this port (requires ${mailbox.smtp_tier} port)`));
+        }
+
+        const validMailbox = await bcrypt.compare(auth.password || '', mailbox.password_hash);
+        if (!validMailbox) {
+          await query(
+            `INSERT INTO mailbox_auth_logs (mailbox_id, email, protocol, remote_addr, success, details)
+             VALUES ($1, $2, 'smtp', $3, false, $4)`,
+            [mailbox.id, mailbox.email, session.remoteAddress || null, 'Invalid SMTP password']
+          );
+          return callback(new Error('Authentication failed'));
+        }
+
+        await query('UPDATE mailbox_accounts SET last_login_at = NOW() WHERE id = $1', [mailbox.id]);
+        await query(
+          `INSERT INTO mailbox_auth_logs (mailbox_id, email, protocol, remote_addr, success, details)
+           VALUES ($1, $2, 'smtp', $3, true, $4)`,
+          [mailbox.id, mailbox.email, session.remoteAddress || null, `SMTP login accepted on ${tier}`]
+        );
+        return callback(null, {
           user: {
-            credentialId: cred.id,
-            organizationId: cred.organization_id,
-            customerDomainId: cred.customer_domain_id,
-            allowedFromEmail: cred.allowed_from_email,
-            defaultFromName: cred.default_from_name,
+            credentialId: null,
+            mailboxId: mailbox.id,
+            organizationId: mailbox.organization_id,
+            customerDomainId: mailbox.customer_domain_id,
+            allowedFromEmail: mailbox.email,
+            defaultFromName: mailbox.display_name,
           } as SmtpCredentialUser,
         });
       } catch {

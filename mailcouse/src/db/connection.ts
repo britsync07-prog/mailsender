@@ -177,6 +177,8 @@ async function runMigrations(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_mailbox_auth_logs_mailbox_id ON mailbox_auth_logs(mailbox_id)`,
     `CREATE INDEX IF NOT EXISTS idx_mailbox_auth_logs_created_at ON mailbox_auth_logs(created_at)`,
+    `ALTER TABLE mailbox_accounts ADD COLUMN IF NOT EXISTS smtp_enabled BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE mailbox_accounts ADD COLUMN IF NOT EXISTS smtp_tier VARCHAR(20) NOT NULL DEFAULT 'personal'`,
     `ALTER TABLE servers ADD COLUMN IF NOT EXISTS spam_threshold DECIMAL(8,2) NOT NULL DEFAULT 5`,
     `ALTER TABLE servers ADD COLUMN IF NOT EXISTS spam_failure_threshold DECIMAL(8,2) NOT NULL DEFAULT 20`,
     `ALTER TABLE sent_messages ADD COLUMN IF NOT EXISTS spam_score DECIMAL(8,2)`,
