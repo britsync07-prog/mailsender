@@ -46,8 +46,8 @@ const VALID_CREDENTIAL_TIERS = ['mass_mail', 'personal', 'transactional'] as con
 type CredentialTier = typeof VALID_CREDENTIAL_TIERS[number];
 
 function parseSubdomainCount(value: unknown): number {
-  const parsed = parseInt(String(value ?? DEFAULT_SUBDOMAIN_COUNT), 10);
-  if (Number.isNaN(parsed)) return DEFAULT_SUBDOMAIN_COUNT;
+  const parsed = parseInt(String(value ?? 0), 10);
+  if (Number.isNaN(parsed)) return 0;
   return Math.min(MAX_PORTAL_SUBDOMAIN_COUNT, Math.max(0, parsed));
 }
 
