@@ -18,6 +18,7 @@ import { config } from '../config';
 type ImapSessionState = {
   user: MailboxAccount | null;
   selected: MailboxFolder | null;
+  secure: boolean;
   buffer: string;
   pendingLiteral: null | {
     tag: string;
@@ -82,12 +83,20 @@ function write(socket: net.Socket, line: string): void {
   socket.write(`${line}\r\n`);
 }
 
-async function handleCommand(socket: net.Socket, state: ImapSessionState, line: string): Promise<void> {
+function getTlsOptions(): { key: Buffer; cert: Buffer } | null {
+  const key = config.dns.tlsKey ? fs.readFileSync(String(config.dns.tlsKey)) : undefined;
+  const cert = config.dns.tlsCert ? fs.readFileSync(String(config.dns.tlsCert)) : undefined;
+  return key && cert ? { key, cert } : null;
+}
+
+async function handleCommand(socket: net.Socket, state: ImapSessionState, line: string, startTls?: (tag: string) => void): Promise<void> {
   const { tag, command, rest } = splitCommand(line);
   if (!command) return write(socket, `${tag} BAD Invalid command`);
 
   if (command === 'CAPABILITY') {
-    write(socket, '* CAPABILITY IMAP4rev1 AUTH=PLAIN UIDPLUS SPECIAL-USE');
+    const caps = ['IMAP4rev1', 'AUTH=PLAIN', 'UIDPLUS', 'SPECIAL-USE'];
+    if (startTls && !state.secure && getTlsOptions()) caps.splice(1, 0, 'STARTTLS');
+    write(socket, `* CAPABILITY ${caps.join(' ')}`);
     return write(socket, `${tag} OK CAPABILITY completed`);
   }
 
@@ -100,7 +109,10 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
   }
 
   if (command === 'STARTTLS') {
-    return write(socket, `${tag} BAD STARTTLS is only available on the plaintext IMAP listener`);
+    if (!startTls || state.secure) return write(socket, `${tag} BAD STARTTLS is not available`);
+    if (!getTlsOptions()) return write(socket, `${tag} NO TLS is not configured`);
+    startTls(tag);
+    return;
   }
 
   if (command === 'LOGIN') {
@@ -204,15 +216,15 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
   return write(socket, `${tag} BAD Command not implemented`);
 }
 
-function handleData(socket: net.Socket, state: ImapSessionState, chunk: Buffer): void {
+function handleData(socket: net.Socket, state: ImapSessionState, chunk: Buffer, startTls?: (tag: string) => void): void {
   state.buffer += chunk.toString('utf8');
-  void processBuffer(socket, state).catch((err) => {
+  void processBuffer(socket, state, startTls).catch((err) => {
     console.error('IMAP command error:', err);
     write(socket, '* BAD Internal server error');
   });
 }
 
-async function processBuffer(socket: net.Socket, state: ImapSessionState): Promise<void> {
+async function processBuffer(socket: net.Socket, state: ImapSessionState, startTls?: (tag: string) => void): Promise<void> {
   if (state.pendingLiteral) {
     const literal = state.pendingLiteral;
     if (Buffer.byteLength(state.buffer) < literal.bytes) return;
@@ -231,22 +243,37 @@ async function processBuffer(socket: net.Socket, state: ImapSessionState): Promi
   while (index >= 0 && !state.pendingLiteral) {
     const line = state.buffer.slice(0, index).replace(/\r$/, '');
     state.buffer = state.buffer.slice(index + 1);
-    if (line.trim()) await handleCommand(socket, state, line);
+    if (line.trim()) await handleCommand(socket, state, line, startTls);
     index = state.buffer.indexOf('\n');
   }
 }
 
 export function createImapServer(implicitTls = false): net.Server | tls.Server {
   const listener = (socket: net.Socket) => {
-    const state: ImapSessionState = { user: null, selected: null, buffer: '', pendingLiteral: null };
+    const state: ImapSessionState = { user: null, selected: null, secure: implicitTls, buffer: '', pendingLiteral: null };
+    let activeSocket: net.Socket = socket;
+    let dataHandler: ((chunk: Buffer | string) => void) | null = null;
+    const attachDataHandler = (target: net.Socket, startTls?: (tag: string) => void) => {
+      dataHandler = (chunk) => handleData(target, state, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk), startTls);
+      target.on('data', dataHandler);
+      target.on('error', (err) => console.error('IMAP socket error:', err.message));
+    };
+    const startTls = (tag: string) => {
+      const options = getTlsOptions();
+      if (!options) return write(activeSocket, `${tag} NO TLS is not configured`);
+      write(activeSocket, `${tag} OK Begin TLS negotiation now`);
+      if (dataHandler) activeSocket.removeListener('data', dataHandler);
+      const secureSocket = new tls.TLSSocket(activeSocket, { isServer: true, ...options });
+      activeSocket = secureSocket;
+      state.secure = true;
+      attachDataHandler(secureSocket);
+    };
     write(socket, `* OK ${config.dns.heloHostname} IMAP4rev1 ready`);
-    socket.on('data', (chunk) => handleData(socket, state, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    socket.on('error', (err) => console.error('IMAP socket error:', err.message));
+    attachDataHandler(socket, implicitTls ? undefined : startTls);
   };
 
   if (!implicitTls) return net.createServer(listener);
-  const key = config.dns.tlsKey ? fs.readFileSync(String(config.dns.tlsKey)) : undefined;
-  const cert = config.dns.tlsCert ? fs.readFileSync(String(config.dns.tlsCert)) : undefined;
-  if (!key || !cert) throw new Error('IMAPS requires DNS_TLS_KEY and DNS_TLS_CERT');
-  return tls.createServer({ key, cert }, listener);
+  const options = getTlsOptions();
+  if (!options) throw new Error('IMAPS requires DNS_TLS_KEY and DNS_TLS_CERT');
+  return tls.createServer(options, listener);
 }
