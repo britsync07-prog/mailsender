@@ -1,4 +1,10 @@
 # MailSender (MailCouse)
+<div align="center">
+
+![License](https://img.shields.io/github/license/britsync07-prog/mailsender?style=flat-square&label=license&color=06b6d4) ![Language](https://img.shields.io/github/languages/top/britsync07-prog/mailsender?style=flat-square&color=0ea5e9) ![Stars](https://img.shields.io/github/stars/britsync07-prog/mailsender?style=flat-square&color=f59e0b) ![Last commit](https://img.shields.io/github/last-commit/britsync07-prog/mailsender?style=flat-square&color=22c55e) ![Repo size](https://img.shields.io/github/repo-size/britsync07-prog/mailsender?style=flat-square&color=94a3b8)
+
+</div>
+
 > A self-hosted, Postal-inspired multi-tenant email delivery and cold-outreach infrastructure platform.
 
 MailSender (internal project name `mailcouse`) is a TypeScript email infrastructure system that replicates the core feature set of the open-source Postal mail server: multi-tenant organizations, scoped mail servers, an inbound SMTP relay, DKIM signing, domain/subdomain verification with live DNS checks, IP-style subdomain pools, message inspection, suppressions, and webhooks. It is driven by a formal Technical Specification Document (TSD v3) targeting engagement-first cold outreach at up to 100,000 emails/day across 50 root domains, with reputation-safe volume distribution via subdomain identities.
@@ -59,12 +65,12 @@ mailsender/
 +-- README.md
 +-- TSD_v3_final.docx / TSD_v3_final.txt   # Technical Specification Document v3
 +-- docs/
-¦   +-- superpowers/
-¦       +-- plans/                         # e.g. domain-subdomain-setup plan
-¦       +-- specs/                         # design specs (verification, relaying)
+ï¿½   +-- superpowers/
+ï¿½       +-- plans/                         # e.g. domain-subdomain-setup plan
+ï¿½       +-- specs/                         # design specs (verification, relaying)
 +-- plans/                                 # plan1..plan20 implementation task lists
 +-- soruce/
-¦   +-- postal/                            # Postal reference material
+ï¿½   +-- postal/                            # Postal reference material
 +-- mailcouse/                             # the application
     +-- package.json                       # build/dev/test/provisioning scripts
     +-- jest.config.js, tsconfig.json
@@ -73,7 +79,7 @@ mailsender/
         +-- index.ts                       # Express bootstrap, portal UI, lifecycle
         +-- api/                           # REST + portal routes, domain logic, auth
         +-- smtp/                          # relay, connection pool, email builder,
-        ¦                                  #   ip-selector, retry-manager, sender
+        ï¿½                                  #   ip-selector, retry-manager, sender
         +-- warmup/                        # scheduler, gate, activator, monitor
         +-- dns/                           # provisioner, record-builder, verifier
         +-- dkim/                          # signing + key encryption
@@ -192,4 +198,4 @@ No docker-compose file ships with this repository; deployment targets a dedicate
 - CSP and cross-origin embedder policies are intentionally relaxed for the embedded Postal-replica UI; tighten before exposing the portal publicly.
 
 ## License
-MIT License — Copyright (c) 2026 Musfiqur Rahman Saimon. See [LICENSE](./LICENSE).
+MIT License ï¿½ Copyright (c) 2026 Musfiqur Rahman Saimon. See [LICENSE](./LICENSE).
