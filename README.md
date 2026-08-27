@@ -199,3 +199,8 @@ No docker-compose file ships with this repository; deployment targets a dedicate
 
 ## License
 MIT License � Copyright (c) 2026 Musfiqur Rahman Saimon. See [LICENSE](./LICENSE).
+
+
+---
+Keywords: mta, smtp relay, dkim spf, email deliverability, multi-tenant, warmup, typescript
+
