@@ -20,6 +20,8 @@ type ImapSessionState = {
   selected: MailboxFolder | null;
   secure: boolean;
   buffer: string;
+  pendingAuth: null | { tag: string };
+  idleTag: string | null;
   pendingLiteral: null | {
     tag: string;
     folderName: string;
@@ -43,6 +45,18 @@ function parseLogin(rest: string): { username: string; password: string } | null
   const match = rest.match(/^\s*(?:"([^"]+)"|(\S+))\s+(?:"([^"]*)"|(\S+))\s*$/);
   if (!match) return null;
   return { username: match[1] || match[2], password: match[3] || match[4] || '' };
+}
+
+function parsePlainCredentials(encoded: string): { username: string; password: string } | null {
+  try {
+    const value = String(encoded || '').trim();
+    if (!value || value === '=' || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return null;
+    const parts = Buffer.from(value, 'base64').toString('utf8').split('\0');
+    if (parts.length !== 3 || !parts[1]) return null;
+    return { username: parts[1], password: parts[2] };
+  } catch {
+    return null;
+  }
 }
 
 function parseFolderName(rest: string): string {
@@ -89,12 +103,28 @@ function getTlsOptions(): { key: Buffer; cert: Buffer } | null {
   return key && cert ? { key, cert } : null;
 }
 
+async function completePlainAuthentication(socket: net.Socket, state: ImapSessionState, tag: string, encoded: string): Promise<void> {
+  const credentials = parsePlainCredentials(encoded);
+  if (!credentials) return write(socket, `${tag} NO Invalid PLAIN authentication response`);
+  const user = await authenticateMailbox(credentials.username, credentials.password, socket.remoteAddress || undefined);
+  if (!user) return write(socket, `${tag} NO Authentication failed`);
+  state.user = user;
+  write(socket, `${tag} OK AUTHENTICATE completed`);
+}
+
+function parseStatusRequest(rest: string): { folderName: string; items: string[] } | null {
+  const match = rest.match(/^\s*(?:"([^"]+)"|(\S+))\s+\(([^)]*)\)\s*$/);
+  if (!match) return null;
+  const items = match[3].split(/\s+/).map((item) => item.toUpperCase()).filter(Boolean);
+  return { folderName: match[1] || match[2], items };
+}
+
 async function handleCommand(socket: net.Socket, state: ImapSessionState, line: string, startTls?: (tag: string) => void): Promise<void> {
   const { tag, command, rest } = splitCommand(line);
   if (!command) return write(socket, `${tag} BAD Invalid command`);
 
   if (command === 'CAPABILITY') {
-    const caps = ['IMAP4rev1', 'AUTH=PLAIN', 'UIDPLUS', 'SPECIAL-USE'];
+    const caps = ['IMAP4rev1', 'AUTH=PLAIN', 'SASL-IR', 'UIDPLUS', 'SPECIAL-USE', 'IDLE', 'NAMESPACE'];
     if (startTls && !state.secure && getTlsOptions()) caps.splice(1, 0, 'STARTTLS');
     write(socket, `* CAPABILITY ${caps.join(' ')}`);
     return write(socket, `${tag} OK CAPABILITY completed`);
@@ -115,6 +145,23 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     return;
   }
 
+  if (command === 'ID') {
+    write(socket, '* ID ("name" "Mailcouse" "version" "1.0")');
+    return write(socket, `${tag} OK ID completed`);
+  }
+
+  if (command === 'AUTHENTICATE') {
+    if (state.user) return write(socket, `${tag} BAD Already authenticated`);
+    const [mechanism, initialResponse] = rest.trim().split(/\s+/, 2);
+    if (String(mechanism || '').toUpperCase() !== 'PLAIN') {
+      return write(socket, `${tag} NO Unsupported authentication mechanism`);
+    }
+    if (initialResponse !== undefined) return completePlainAuthentication(socket, state, tag, initialResponse);
+    state.pendingAuth = { tag };
+    socket.write('+ \r\n');
+    return;
+  }
+
   if (command === 'LOGIN') {
     const parsed = parseLogin(rest);
     if (!parsed) return write(socket, `${tag} BAD LOGIN requires username and password`);
@@ -126,11 +173,33 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
 
   if (!state.user) return write(socket, `${tag} NO Authentication required`);
 
+  if (command === 'NAMESPACE') {
+    write(socket, '* NAMESPACE (("" "/")) NIL NIL');
+    return write(socket, `${tag} OK NAMESPACE completed`);
+  }
+
+  if (command === 'STATUS') {
+    const request = parseStatusRequest(rest);
+    if (!request) return write(socket, `${tag} BAD STATUS requires a mailbox and data items`);
+    const folder = await getFolder(state.user.id, request.folderName);
+    if (!folder) return write(socket, `${tag} NO Mailbox does not exist`);
+    const stats = await getFolderStats(folder.id);
+    const values: string[] = [];
+    for (const item of request.items) {
+      if (item === 'MESSAGES') values.push(`MESSAGES ${stats.exists}`);
+      if (item === 'UNSEEN') values.push(`UNSEEN ${stats.unseen}`);
+      if (item === 'UIDNEXT') values.push(`UIDNEXT ${stats.uidNext}`);
+      if (item === 'UIDVALIDITY') values.push(`UIDVALIDITY ${stats.uidValidity}`);
+    }
+    write(socket, `* STATUS ${quote(folder.name)} (${values.join(' ')})`);
+    return write(socket, `${tag} OK STATUS completed`);
+  }
+
   if (command === 'LIST' || command === 'LSUB') {
     const folders = await listFolders(state.user.id);
     for (const folder of folders) {
       const attrs = folder.special_use ? `(${folder.special_use})` : '()';
-      write(socket, `* LIST ${attrs} "/" ${quote(folder.name)}`);
+      write(socket, `* ${command} ${attrs} "/" ${quote(folder.name)}`);
     }
     return write(socket, `${tag} OK ${command} completed`);
   }
@@ -142,12 +211,26 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     const stats = await getFolderStats(folder.id);
     write(socket, '* FLAGS (\\Seen \\Answered \\Flagged \\Deleted \\Draft)');
     write(socket, `* ${stats.exists} EXISTS`);
-    write(socket, `* ${stats.unseen} RECENT`);
+    write(socket, '* 0 RECENT');
     write(socket, `* OK [UIDVALIDITY ${stats.uidValidity}] UIDs valid`);
     write(socket, `* OK [UIDNEXT ${stats.uidNext}] Predicted next UID`);
     write(socket, '* OK [PERMANENTFLAGS (\\Seen \\Answered \\Flagged \\Deleted \\Draft)] Flags permitted');
-    return write(socket, `${tag} OK [READ-WRITE] ${command} completed`);
+    return write(socket, `${tag} OK [${command === 'EXAMINE' ? 'READ-ONLY' : 'READ-WRITE'}] ${command} completed`);
   }
+
+  if (command === 'IDLE') {
+    if (!state.selected) return write(socket, `${tag} NO Select a mailbox first`);
+    state.idleTag = tag;
+    socket.write('+ idling\r\n');
+    return;
+  }
+
+  if (command === 'CLOSE' || command === 'UNSELECT') {
+    state.selected = null;
+    return write(socket, `${tag} OK ${command} completed`);
+  }
+
+  if (command === 'CHECK') return write(socket, `${tag} OK CHECK completed`);
 
   if (!state.selected && ['FETCH', 'UID', 'STORE', 'SEARCH'].includes(command)) {
     return write(socket, `${tag} NO Select a mailbox first`);
@@ -225,6 +308,31 @@ function handleData(socket: net.Socket, state: ImapSessionState, chunk: Buffer, 
 }
 
 async function processBuffer(socket: net.Socket, state: ImapSessionState, startTls?: (tag: string) => void): Promise<void> {
+  if (state.pendingAuth) {
+    const index = state.buffer.indexOf('\n');
+    if (index < 0) return;
+    const response = state.buffer.slice(0, index).replace(/\r$/, '');
+    state.buffer = state.buffer.slice(index + 1);
+    const tag = state.pendingAuth.tag;
+    state.pendingAuth = null;
+    if (response === '*') write(socket, `${tag} BAD AUTHENTICATE cancelled`);
+    else await completePlainAuthentication(socket, state, tag, response);
+  }
+
+  if (state.idleTag) {
+    const index = state.buffer.indexOf('\n');
+    if (index < 0) return;
+    const response = state.buffer.slice(0, index).replace(/\r$/, '');
+    state.buffer = state.buffer.slice(index + 1);
+    const tag = state.idleTag;
+    state.idleTag = null;
+    if (response.trim().toUpperCase() !== 'DONE') {
+      write(socket, `${tag} BAD Expected DONE while idling`);
+      return;
+    }
+    write(socket, `${tag} OK IDLE terminated`);
+  }
+
   if (state.pendingLiteral) {
     const literal = state.pendingLiteral;
     if (Buffer.byteLength(state.buffer) < literal.bytes) return;
@@ -240,7 +348,7 @@ async function processBuffer(socket: net.Socket, state: ImapSessionState, startT
   }
 
   let index = state.buffer.indexOf('\n');
-  while (index >= 0 && !state.pendingLiteral) {
+  while (index >= 0 && !state.pendingLiteral && !state.pendingAuth && !state.idleTag) {
     const line = state.buffer.slice(0, index).replace(/\r$/, '');
     state.buffer = state.buffer.slice(index + 1);
     if (line.trim()) await handleCommand(socket, state, line, startTls);
@@ -250,7 +358,7 @@ async function processBuffer(socket: net.Socket, state: ImapSessionState, startT
 
 export function createImapServer(implicitTls = false): net.Server | tls.Server {
   const listener = (socket: net.Socket) => {
-    const state: ImapSessionState = { user: null, selected: null, secure: implicitTls, buffer: '', pendingLiteral: null };
+    const state: ImapSessionState = { user: null, selected: null, secure: implicitTls, buffer: '', pendingAuth: null, idleTag: null, pendingLiteral: null };
     let activeSocket: net.Socket = socket;
     let dataHandler: ((chunk: Buffer | string) => void) | null = null;
     const attachDataHandler = (target: net.Socket, startTls?: (tag: string) => void) => {
