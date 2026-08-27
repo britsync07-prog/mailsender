@@ -1271,7 +1271,7 @@ async function start() {
       smtpServers.push(server);
     });
 
-    if (config.platform.imapEnabled) {
+    if (config.platform.imapEnabled && config.platform.mailboxBackend === 'node') {
       const imapServer = createImapServer(false);
       imapServer.listen(config.platform.imapPort, () => {
         console.log(`IMAP server listening on port ${config.platform.imapPort}`);
@@ -1287,6 +1287,8 @@ async function start() {
       } catch (err: any) {
         console.warn(`IMAPS disabled: ${err.message}`);
       }
+    } else if (config.platform.imapEnabled) {
+      console.log('IMAP is owned by Dovecot; the Node IMAP listener is disabled');
     }
   } catch (error) {
     console.error('Failed to start server:', error);

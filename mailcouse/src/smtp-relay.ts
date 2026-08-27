@@ -34,6 +34,10 @@ function formatAddressHeader(name: string | null | undefined, address: string): 
   return `"${escaped}" <${address}>`;
 }
 
+function smtpCodeFromMessage(message: string): number {
+  return parseInt(String(message || '').match(/\b([245]\d{2})\b/)?.[1] || '0', 10);
+}
+
 // Permanent recipient-level rejections worth suppressing (not policy/IP blocks)
 function isHardBounce(code: number, message: string): boolean {
   if (code < 550 || code > 599) return false;
@@ -275,7 +279,8 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
                   messageId: msgId,
                 });
 
-                results.push({ to: recipient, success: true, code: 250, message: info.response || 'OK' });
+                const response = info.response || 'OK';
+                results.push({ to: recipient, success: true, code: smtpCodeFromMessage(response) || 250, message: response });
                 delivered = true;
                 break;
               } catch (err: any) {

@@ -16,6 +16,10 @@ async function resolveMxIpv4(mxHost: string): Promise<string> {
   return mxHost;
 }
 
+function smtpCodeFromMessage(message: string): number {
+  return parseInt(String(message || '').match(/\b([245]\d{2})\b/)?.[1] || '0', 10);
+}
+
 router.post('/', async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
@@ -140,6 +144,11 @@ ${body.replace(/\n/g, '<br>\n')}
         transporter.close();
 
         await query('UPDATE sent_messages SET status = $1, sent_at = NOW() WHERE id = $2', ['accepted', sentMessageId]);
+        await query(
+          `INSERT INTO delivery_attempts (sent_message_id, organization_id, rcpt_to, status, smtp_code, details, created_at)
+           VALUES ($1, (SELECT organization_id FROM sent_messages WHERE id = $1), $2, $3, $4, $5, NOW())`,
+          [sentMessageId, to.toLowerCase(), 'accepted', smtpCodeFromMessage(info.response || ''), info.response || 'Accepted by recipient server']
+        );
 
         await query(
           `UPDATE subdomains SET emails_sent_today = emails_sent_today + 1, total_sent = total_sent + 1 WHERE id = $1`,
@@ -157,6 +166,11 @@ ${body.replace(/\n/g, '<br>\n')}
         lastError = err.message || err.code || String(err);
         if (sentMessageId) {
           await query('UPDATE sent_messages SET status = $1 WHERE id = $2', ['failed', sentMessageId]);
+          await query(
+            `INSERT INTO delivery_attempts (sent_message_id, organization_id, rcpt_to, status, smtp_code, details, created_at)
+             VALUES ($1, (SELECT organization_id FROM sent_messages WHERE id = $1), $2, $3, $4, $5, NOW())`,
+            [sentMessageId, to.toLowerCase(), 'failed', smtpCodeFromMessage(lastError), lastError]
+          );
         }
         if (lastError.includes('ENOTFOUND')) break;
       }

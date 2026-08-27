@@ -141,6 +141,7 @@ Copy your secrets into `.env` (names below are read by `src/config/index.ts`; va
 | SMTP_PORT / SMTP_PORT_ALT | 587 / 25 |
 | SMTP_PORT_MASS / SMTP_PORT_PERSONAL / SMTP_PORT_TRANSACTIONAL | 587 / 588 / 589 |
 | IMAP_ENABLED / IMAP_PORT / IMAPS_PORT | true / 143 / 993 |
+| MAILBOX_BACKEND / DOVECOT_LMTP_HOST / DOVECOT_LMTP_PORT | dovecot / 127.0.0.1 / 24 |
 | SMTP_TLS_CERT (or SMTP_TLS_FULLCHAIN) / SMTP_TLS_KEY (or SMTP_TLS_PRIVKEY) | /path/fullchain.pem / /path/privkey.pem |
 | OUTBOUND_IPV4 (or OUTBOUND_LOCAL_ADDRESS) / OUTBOUND_IPV6 | 203.0.113.10 / (empty) |
 | CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID | cf-token-placeholder / cf-account-placeholder |
