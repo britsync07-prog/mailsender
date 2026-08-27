@@ -34,6 +34,12 @@ function formatAddressHeader(name: string | null | undefined, address: string): 
   return `"${escaped}" <${address}>`;
 }
 
+// Permanent recipient-level rejections worth suppressing (not policy/IP blocks)
+function isHardBounce(code: number, message: string): boolean {
+  if (code < 550 || code > 599) return false;
+  return /invalid recipient|recipient address rejected|access denied|unknown user|user unknown|no such (user|mailbox|recipient|domain)|does not exist|mailbox not found|no mailbox here|recipient not found|address rejected/i.test(message);
+}
+
 export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
   let tlsOpts: { key: Buffer; cert: Buffer } | undefined;
   try {
@@ -189,6 +195,17 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
           }
         }
 
+        // Skip suppressed recipients before any delivery attempt
+        const supRes = rcptTo.length > 0 ? await query<{ email: string; reason: string }>(
+          'SELECT email, reason FROM suppression_list WHERE LOWER(email) = ANY($1)',
+          [rcptTo.map(r => r.toLowerCase())]
+        ) : { rows: [] as { email: string; reason: string }[] };
+        const suppressed = new Map(supRes.rows.map(r => [r.email.toLowerCase(), r.reason]));
+        const activeRcpts = rcptTo.filter(r => !suppressed.has(r.toLowerCase()));
+        if (suppressed.size > 0) {
+          console.log(`[smtp-relay:${tier}] Skipped ${suppressed.size} suppressed recipient(s) for ${fromAddr}`);
+        }
+
         const msgId = parsed.messageId || `<${crypto.randomUUID()}@${customerDomain.domain}>`;
         const envFromAddr = session.envelope.mailFrom && typeof session.envelope.mailFrom === 'object' ? session.envelope.mailFrom.address : fromAddr;
         const envelopeFrom = envFromAddr;
@@ -218,23 +235,25 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
           }
         } catch {}
 
-        // Deliver to all recipients
-        const results: { to: string; success: boolean; message: string }[] = [];
+        // Deliver to all non-suppressed recipients
+        const results: { to: string; success: boolean; code: number; message: string }[] = [];
 
-        for (const recipient of rcptTo) {
+        for (const recipient of activeRcpts) {
           try {
             const mxRecords = await dns.promises.resolveMx(recipient.split('@')[1]);
             if (!mxRecords || mxRecords.length === 0) {
-              results.push({ to: recipient, success: false, message: 'No MX records' });
+              results.push({ to: recipient, success: false, code: 0, message: 'No MX records' });
               continue;
             }
             mxRecords.sort((a, b) => a.priority - b.priority);
 
             let delivered = false;
+            let lastErr: { code: number; message: string; host: string } | null = null;
             for (const mx of mxRecords) {
+              let transporter: nodemailer.Transporter | null = null;
               try {
                 const keyData = await getDomainDKIMPrivateKey(customerDomain.id);
-                const transporter = nodemailer.createTransport({
+                transporter = nodemailer.createTransport({
                   host: await resolveMxIpv4(mx.exchange),
                   port: 25,
                   secure: false,
@@ -256,51 +275,106 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
                   messageId: msgId,
                 });
 
-                transporter.close();
-                results.push({ to: recipient, success: true, message: info.response });
+                results.push({ to: recipient, success: true, code: 250, message: info.response || 'OK' });
                 delivered = true;
                 break;
               } catch (err: any) {
-                if (!delivered && mx === mxRecords[mxRecords.length - 1]) {
-                  results.push({ to: recipient, success: false, message: err.message });
-                }
+                const code = typeof err?.responseCode === 'number' ? err.responseCode : 0;
+                const detail = String(err?.response || err?.message || 'unknown error').replace(/\s+/g, ' ').trim();
+                lastErr = { code, message: `[${mx.exchange}] ${detail}`, host: mx.exchange };
+                console.error(`[smtp-relay:${tier}] DELIVERY FAIL to=${recipient} host=${mx.exchange} code=${code} :: ${detail.slice(0, 300)}`);
+              } finally {
+                transporter?.close();
               }
             }
-            if (!delivered) {
-              results.push({ to: recipient, success: false, message: 'All MX servers failed' });
+            if (!delivered && lastErr) {
+              results.push({ to: recipient, success: false, code: lastErr.code, message: lastErr.message });
+            }
+            if (!delivered && !lastErr) {
+              results.push({ to: recipient, success: false, code: 0, message: 'All MX servers failed' });
             }
           } catch (err: any) {
-            results.push({ to: recipient, success: false, message: err.message });
+            const code = typeof err?.responseCode === 'number' ? err.responseCode : 0;
+            const detail = String(err?.message || 'delivery error');
+            console.error(`[smtp-relay:${tier}] DELIVERY ERROR to=${recipient} code=${code} :: ${detail.slice(0, 300)}`);
+            results.push({ to: recipient, success: false, code, message: detail });
           }
         }
 
         // Record in database
-        const allSuccess = results.every(r => r.success);
-        await query(
-          `INSERT INTO sent_messages (organization_id, credential_id, customer_domain_id, subdomain_id, mail_from, rcpt_to, subject, body_html, body_text, raw_headers, size, status, message_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        const attempted = results;
+        const allSuccess = attempted.length > 0 && attempted.every(r => r.success);
+        const failures = attempted.filter(r => !r.success)
+          .map(r => `${r.to}: [${r.code}] ${r.message}`)
+          .join(' | ')
+          .slice(0, 4000);
+        const suppressionNotes = Array.from(suppressed.entries())
+          .map(([email, reason]) => `${email}: suppressed (${reason})`)
+          .join(' | ')
+          .slice(0, 2000);
+        const finalStatus = attempted.length === 0 ? 'suppressed' : (allSuccess ? 'accepted' : 'failed');
+        const bounceText = [
+          failures,
+          suppressionNotes ? `suppressed: ${suppressionNotes}` : '',
+        ].filter(Boolean).join(' | ').slice(0, 4000);
+
+        const smResult = await query<{ id: string }>(
+          `INSERT INTO sent_messages (organization_id, credential_id, customer_domain_id, subdomain_id, mail_from, rcpt_to, subject, body_html, body_text, raw_headers, size, status, message_id, bounce)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
           [
             authUser.organizationId, authUser.credentialId, customerDomain.id, sub.id,
             fromAddr, rcptTo.join(', '), subject,
             parsed.html || '', parsed.text || '',
             JSON.stringify(parsed.headers || {}), size,
-            allSuccess ? 'accepted' : 'failed',
+            finalStatus,
             msgId,
+            bounceText,
           ]
         );
+        const smId = smResult.rows[0].id;
 
-        await query(
-          'UPDATE subdomains SET emails_sent_today = emails_sent_today + 1, total_sent = total_sent + 1 WHERE id = $1',
-          [sub.id]
-        );
+        for (const r of results) {
+          await query(
+            `INSERT INTO delivery_attempts (sent_message_id, organization_id, rcpt_to, status, smtp_code, details)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [smId, authUser.organizationId, r.to, r.success ? 'accepted' : 'failed', r.code, r.message.slice(0, 1000)]
+          );
 
-        await query(
-          `INSERT INTO subdomain_pool_tracking (subdomain_id, organization_id, last_used_at, total_assigned)
-           VALUES ($1, $2, NOW(), 1)
-           ON CONFLICT (subdomain_id, organization_id)
-           DO UPDATE SET last_used_at = NOW(), total_assigned = subdomain_pool_tracking.total_assigned + 1`,
-          [sub.id, authUser.organizationId]
-        );
+          // Auto-suppress permanent recipient failures so future campaigns skip them
+          if (!r.success && isHardBounce(r.code, r.message)) {
+            console.warn(`[smtp-relay:${tier}] HARD BOUNCE — suppressing ${r.to} :: [${r.code}] ${r.message.slice(0, 150)}`);
+            await query(
+              `INSERT INTO suppression_list (email, reason)
+               VALUES ($1, $2)
+               ON CONFLICT (email) DO NOTHING`,
+              [r.to.toLowerCase(), `hard_bounce: [${r.code}] ${r.message}`.slice(0, 50)]
+            );
+          }
+        }
+
+        for (const [email] of suppressed) {
+          await query(
+            `INSERT INTO delivery_attempts (sent_message_id, organization_id, rcpt_to, status, smtp_code, details)
+             VALUES ($1, $2, $3, 'suppressed', 0, $4)`,
+            [smId, authUser.organizationId, email, `Suppressed: ${suppressed.get(email) || 'listed'}`.slice(0, 1000)]
+          );
+        }
+
+        // Count pool usage only when a real delivery attempt happened
+        if (attempted.length > 0) {
+          await query(
+            'UPDATE subdomains SET emails_sent_today = emails_sent_today + 1, total_sent = total_sent + 1 WHERE id = $1',
+            [sub.id]
+          );
+
+          await query(
+            `INSERT INTO subdomain_pool_tracking (subdomain_id, organization_id, last_used_at, total_assigned)
+             VALUES ($1, $2, NOW(), 1)
+             ON CONFLICT (subdomain_id, organization_id)
+             DO UPDATE SET last_used_at = NOW(), total_assigned = subdomain_pool_tracking.total_assigned + 1`,
+            [sub.id, authUser.organizationId]
+          );
+        }
 
         callback();
       } catch (err: any) {
