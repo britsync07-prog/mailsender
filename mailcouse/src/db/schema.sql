@@ -850,16 +850,3 @@ CREATE INDEX IF NOT EXISTS idx_warmup_conv_sent_at ON warmup_conversations(sent_
 CREATE INDEX IF NOT EXISTS idx_subdomains_active_warmup_daily ON subdomains(status, warmup_complete, emails_sent_today, daily_limit)
     WHERE status = 'active' AND warmup_complete = true;
 CREATE INDEX IF NOT EXISTS idx_subdomains_domain_status ON subdomains(domain_id, status);
-
--- EMAIL VERIFICATIONS (pre-send existence checks)
-CREATE TABLE IF NOT EXISTS email_verifications (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email VARCHAR(320) NOT NULL UNIQUE,
-  status VARCHAR(20) NOT NULL CHECK (status IN ('valid','invalid','catch_all','unknown')),
-  smtp_code INTEGER,
-  mx_host VARCHAR(255),
-  detail TEXT,
-  catch_all BOOLEAN NOT NULL DEFAULT FALSE,
-  checked_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_email_verifications_status ON email_verifications(status);

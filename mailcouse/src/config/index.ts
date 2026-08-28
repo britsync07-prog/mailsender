@@ -125,9 +125,6 @@ export const config = {
     imapEnabled: process.env.IMAP_ENABLED !== 'false',
     imapPort: parseInt(process.env.IMAP_PORT || '143'),
     imapsPort: parseInt(process.env.IMAPS_PORT || '993'),
-    mailboxBackend: process.env.MAILBOX_BACKEND === 'dovecot' ? 'dovecot' : 'node',
-    dovecotLmtpHost: process.env.DOVECOT_LMTP_HOST || '127.0.0.1',
-    dovecotLmtpPort: parseInt(process.env.DOVECOT_LMTP_PORT || '24'),
   },
 
   // DNS settings (Postal Config.dns equivalent)

@@ -12,7 +12,6 @@ import apiRoutes from './api/routes';
 import healthRoutes from './api/health-routes';
 import adminRoutes from './api/admin-routes';
 import sendRoutes from './api/send-routes';
-import verifyRoutes from './api/verify-routes';
 import authRoutes from './api/auth-routes';
 import portalRoutes from './api/portal-routes';
 import { authenticate } from './api/auth-middleware';
@@ -170,7 +169,6 @@ app.use('/api/leads', apiLimiter, apiRoutes);
 app.use('/api/health', healthLimiter, healthRoutes);
 app.use('/api/admin', apiLimiter, adminRoutes);
 app.use('/api/send', apiLimiter, sendRoutes);
-app.use('/api/verify', apiLimiter, verifyRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/portal', apiLimiter, portalRoutes);
 app.use('/track', trackingRoutes);
@@ -1271,7 +1269,7 @@ async function start() {
       smtpServers.push(server);
     });
 
-    if (config.platform.imapEnabled && config.platform.mailboxBackend === 'node') {
+    if (config.platform.imapEnabled) {
       const imapServer = createImapServer(false);
       imapServer.listen(config.platform.imapPort, () => {
         console.log(`IMAP server listening on port ${config.platform.imapPort}`);
@@ -1287,8 +1285,6 @@ async function start() {
       } catch (err: any) {
         console.warn(`IMAPS disabled: ${err.message}`);
       }
-    } else if (config.platform.imapEnabled) {
-      console.log('IMAP is owned by Dovecot; the Node IMAP listener is disabled');
     }
   } catch (error) {
     console.error('Failed to start server:', error);

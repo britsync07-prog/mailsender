@@ -1,47 +1,28 @@
 import { SMTPServer } from 'smtp-server';
-import * as nodemailer from 'nodemailer';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { query, getPool } from '../db/connection';
 import { appendMessage, normalizeMailboxEmail } from '../imap/mailbox-store';
-import { config } from '../config';
 
 const WARMUP_STORE = '/tmp/warmup_mail_store';
 
-async function deliverToLocalMailboxes(recipients: string[], rawEmail: string, mailFrom?: string): Promise<number> {
+async function deliverToLocalMailboxes(recipients: string[], rawEmail: string): Promise<number> {
   let delivered = 0;
   for (const recipient of recipients.map(normalizeMailboxEmail).filter(Boolean)) {
-    const result = await query<{ id: string; email: string }>(
-      `SELECT ma.id, ma.email
+    const result = await query<{ id: string }>(
+      `SELECT ma.id
        FROM mailbox_accounts ma
        WHERE LOWER(ma.email) = $1 AND ma.active = true
        UNION
-       SELECT ma.id, ma.email
+       SELECT ma.id
        FROM mailbox_aliases a
        JOIN mailbox_accounts ma ON ma.id = a.mailbox_id
        WHERE LOWER(a.address) = $1 AND a.active = true AND ma.active = true`,
       [recipient]
     );
     for (const row of result.rows) {
-      if (config.platform.mailboxBackend === 'dovecot') {
-        const transporter = nodemailer.createTransport({
-          host: config.platform.dovecotLmtpHost,
-          port: config.platform.dovecotLmtpPort,
-          secure: false,
-          lmtp: true,
-        });
-        try {
-          await transporter.sendMail({
-            envelope: { from: mailFrom || `postmaster@${config.dns.heloHostname}`, to: [row.email] },
-            raw: rawEmail,
-          });
-        } finally {
-          transporter.close();
-        }
-      } else {
-        await appendMessage({ mailboxId: row.id, folderName: 'INBOX', rawSource: rawEmail, flags: [] });
-      }
+      await appendMessage({ mailboxId: row.id, folderName: 'INBOX', rawSource: rawEmail, flags: [] });
       delivered++;
     }
   }
@@ -68,20 +49,6 @@ function classifyBounce(status: number | undefined, diagnostic: string | undefin
   return 'hard_bounce';
 }
 
-function looksLikeDeliveryStatusNotification(rawEmail: string): boolean {
-  const lower = rawEmail.toLowerCase();
-  return (
-    lower.includes('content-type: multipart/report') ||
-    lower.includes('report-type=delivery-status') ||
-    lower.includes('content-type: message/delivery-status') ||
-    lower.includes('diagnostic-code:') ||
-    lower.includes('final-recipient:') ||
-    lower.includes('original-recipient:') ||
-    lower.includes('status: 5.') ||
-    lower.includes('status: 4.')
-  );
-}
-
 const server = new SMTPServer({
   name: 'bounce-handler',
   banner: 'Bounce Handler Ready',
@@ -98,11 +65,9 @@ const server = new SMTPServer({
         .map((r: any) => typeof r === 'object' ? r.address : String(r || ''))
         .filter(Boolean);
       const localRecipients = envelopeRecipients.length > 0 ? envelopeRecipients : [recipient].filter(Boolean);
-      const mailFrom = session.envelope.mailFrom;
-      const fromAddr = typeof mailFrom === 'object' ? mailFrom?.address?.toLowerCase() : String(mailFrom || '').toLowerCase();
 
       try {
-        const localDelivered = await deliverToLocalMailboxes(localRecipients, rawEmail, fromAddr);
+        const localDelivered = await deliverToLocalMailboxes(localRecipients, rawEmail);
         if (localDelivered > 0) {
           callback();
           return;
@@ -118,6 +83,9 @@ const server = new SMTPServer({
 
       if (isWarmup.rows.length > 0) {
         const partner = isWarmup.rows[0];
+        const mailFrom = session.envelope.mailFrom;
+        const fromAddr = typeof mailFrom === 'object' ? mailFrom.address?.toLowerCase() : '';
+
         const msgId = randomUUID();
         const storeDir = path.join(WARMUP_STORE, partner.mailbox_name);
         fs.mkdirSync(storeDir, { recursive: true });
@@ -144,11 +112,6 @@ const server = new SMTPServer({
         return;
       }
 
-      if (!looksLikeDeliveryStatusNotification(rawEmail)) {
-        callback();
-        return;
-      }
-
       let bounceType = 'unknown';
       let smtpCode = 0;
       let diagnostic = '';
@@ -165,8 +128,9 @@ const server = new SMTPServer({
       if (!smtpCode && statusMatch) smtpCode = parseInt(statusMatch[1].split('.')[0]);
       if (rcptMatch) originalRcpt = rcptMatch[1];
 
+      const mailFrom = session.envelope.mailFrom;
       let bounceRcpt = originalRcpt
-        || fromAddr
+        || (typeof mailFrom === 'object' ? mailFrom.address : '')
         || recipient
         || '';
 

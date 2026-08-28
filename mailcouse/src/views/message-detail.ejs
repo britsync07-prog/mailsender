@@ -100,23 +100,15 @@
         </li>
         <% if (!msg.deliveries || msg.deliveries.length === 0) { %>
           <li class="deliveryList__item">
-            <% if (msg.status === 'failed') { %>
-              <div class="deliveryList__top">
-                <div class="deliveryList__time"><%= new Date(msg.sent_at || msg.created_at).toLocaleString() %></div>
-                <div class="deliveryList__status"><span class="label label--large label--messageStatus-failed">Failed</span></div>
-              </div>
-              <p class="deliveryList__error"><%= msg.bounce || 'Delivery failed, but this older message does not have a stored SMTP attempt reason.' %></p>
-            <% } else { %>
-              <div class="noData noData--clean">
-                <h2 class="noData__text">No delivery attempts yet.</h2>
-              </div>
-            <% } %>
+            <div class="noData noData--clean">
+              <h2 class="noData__text">No delivery attempts yet.</h2>
+            </div>
           </li>
         <% } else { %>
           <% (msg.deliveries || []).slice().reverse().forEach(function(delivery) { %>
             <li class="deliveryList__item">
               <div class="deliveryList__top">
-                <div class="deliveryList__time"><%= new Date(delivery.timestamp || delivery.created_at).toLocaleString() %></div>
+                <div class="deliveryList__time"><%= new Date(delivery.timestamp).toLocaleString() %></div>
                 <div class="deliveryList__status">
                   <span class="label label--large label--messageStatus-<%= (delivery.status || 'pending').replace(/ /g, '_') %>"><%= (delivery.status || 'pending').replace(/_/g, ' ').replace(/^./, function(c) { return c.toUpperCase(); }) %></span>
                 </div>
@@ -144,7 +136,7 @@
   <ul class="messageActivity">
     <% (msg.deliveries || []).slice().reverse().forEach(function(entry) { %>
       <li class="messageActivity__event">
-        <p class="messageActivity__timestamp"><%= new Date(entry.timestamp || entry.created_at).toLocaleString() %></p>
+        <p class="messageActivity__timestamp"><%= new Date(entry.timestamp).toLocaleString() %></p>
         <div class="messageActivity__details messageActivity--detailsDelivery">
           <p class="messageActivity__subject">
             <span class="label label--large label--messageStatus-<%= (entry.status || 'pending').replace(/ /g, '_') %>"><%= (entry.status || 'pending').replace(/_/g, ' ').replace(/^./, function(c) { return c.toUpperCase(); }) %></span>

@@ -16,16 +16,12 @@ export async function runMidnightReset(): Promise<CronJobResult> {
     // Reset IP daily counters
     await query('UPDATE ip_pool SET emails_today = 0');
 
-    // Reset Redis counters (fail fast — a Redis outage must not hang this job)
+    // Reset Redis counters
     try {
       const Redis = require('ioredis');
       const redis = new Redis({
-        host: process.env.REDIS_PRIMARY_HOST || process.env.REDIS_HOST || 'localhost',
+        host: process.env.REDIS_HOST || 'localhost',
         port: parseInt(process.env.REDIS_PORT || '6379'),
-        connectTimeout: 3000,
-        maxRetriesPerRequest: 1,
-        enableOfflineQueue: false,
-        retryStrategy: () => null,
       });
 
       // Clear all subdomain counters
@@ -79,9 +75,7 @@ export async function runMidnightReset(): Promise<CronJobResult> {
 async function archivePreviousDay(): Promise<void> {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  // Format in local time (toISOString would shift the date across timezones)
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const dateStr = `${yesterday.getFullYear()}-${pad(yesterday.getMonth() + 1)}-${pad(yesterday.getDate())}`;
+  const dateStr = yesterday.toISOString().split('T')[0];
 
   // Get yesterday's stats
   const stats = await query<{ count: number }>(
