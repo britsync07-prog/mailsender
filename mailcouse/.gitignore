@@ -45,6 +45,5 @@ temp/
 *.so
 *.dylib
 bin/
-**/tools/email-verifier/email-verifier
-**/tools/email-verifier/email-verifier.exe
-
+tools/email-verifier/email-verifier
+tools/email-verifier/email-verifier.exe

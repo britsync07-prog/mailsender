@@ -6,6 +6,7 @@ import { sendEmailWithContent } from '../smtp/sender';
 import { buildEmail } from '../smtp/email-builder';
 import { DEFAULT_SMTP_CONFIG } from '../smtp/types';
 import { decideTiming, shouldDelaySend, getCadenceStats } from '../fingerprint/pattern-diversifier';
+import { verifyRecipient } from '../verification';
 
 export async function processJob(job: JobPayload): Promise<JobProcessingResult> {
   const startTime = Date.now();
@@ -21,14 +22,15 @@ export async function processJob(job: JobPayload): Promise<JobProcessingResult> 
       await sleep(timing.delayMs);
     }
 
-    const isSuppressed = await checkSuppression(job.email);
-    if (isSuppressed) {
+    // Pre-send verification layer (suppression lookup + cache + verifier policy)
+    const verification = await verifyRecipient(job.email);
+    if (!verification.allowed) {
       await updateJobStatus(job.job_id, 'suppressed');
       return {
         job_id: job.job_id,
         success: false,
         action: 'suppressed',
-        error: 'Lead is suppressed',
+        error: `Verification rejected: ${verification.reason}`,
         duration_ms: Date.now() - startTime,
       };
     }

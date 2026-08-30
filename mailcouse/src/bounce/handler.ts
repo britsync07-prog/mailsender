@@ -4,6 +4,7 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { query, getPool } from '../db/connection';
 import { appendMessage, normalizeMailboxEmail } from '../imap/mailbox-store';
+import { isEntireFamousDomain } from '../verification/famous-domains';
 
 const WARMUP_STORE = '/tmp/warmup_mail_store';
 
@@ -156,10 +157,12 @@ const server = new SMTPServer({
           [rcpt, bounceType, smtpCode, diagnostic || subject, rawEmail.slice(0, 1000)]
         );
 
-        if (bounceType === 'hard_bounce' || bounceType === 'policy_block' || bounceType === 'mailbox_full') {
+        if ((bounceType === 'hard_bounce' || bounceType === 'policy_block' || bounceType === 'mailbox_full') && !isEntireFamousDomain(rcpt)) {
           await query(
-            `INSERT INTO suppression_list (email, reason)
-             VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`,
+            `INSERT INTO suppression_list (email, reason, status, first_seen, last_seen)
+             VALUES ($1, $2, 'hard_bounce', NOW(), NOW())
+             ON CONFLICT (email)
+             DO UPDATE SET reason = EXCLUDED.reason, status = 'hard_bounce', last_seen = NOW()`,
             [rcpt, bounceType]
           );
         }

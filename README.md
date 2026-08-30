@@ -86,6 +86,7 @@ mailsender/
         +-- bounce/ complaint/             # feedback loops
         +-- imap/ ingestion/               # mailbox polling, lead sources
         +-- validation/                    # staged lead validation
+        +-- verification/                  # pre-send verification client, cache & policy
         +-- segmentation/ suppression/     # audience + exclusion management
         +-- content/                       # spintax rendering
         +-- queue/ worker/ cron/           # dispatch pipeline
@@ -95,6 +96,9 @@ mailsender/
         +-- db/ config/ scripts/           # pool, typed config, seed/provision CLIs
         +-- public/ views/                 # Postal-replica assets and EJS templates
         +-- **/__tests__/                  # colocated Jest suites
++-- email-verifier-service/                # Go microservice (AfterShip/email-verifier engine)
+    +-- config/ handlers/ metrics/ middleware/ policy/ verifier/
+    +-- Dockerfile, docker-compose.yml, email-verifier.service
 ```
 
 ## Getting Started

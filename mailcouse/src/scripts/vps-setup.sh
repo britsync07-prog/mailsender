@@ -15,10 +15,10 @@ fi
 echo "[1/6] Updating system packages..."
 apt update && apt upgrade -y
 
-echo "[2/6] Installing Node.js 22..."
+echo "[2/6] Installing Node.js 22 and Go toolchain..."
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt install -y nodejs git
-node -v && npm -v
+apt install -y nodejs git golang-go
+node -v && npm -v && go version
 
 echo "[3/6] Installing PostgreSQL 16..."
 apt install -y postgresql postgresql-contrib

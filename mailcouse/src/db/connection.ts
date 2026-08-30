@@ -189,6 +189,12 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE routes ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'Endpoint'`,
     `ALTER TABLE customer_domains DROP CONSTRAINT IF EXISTS customer_domains_domain_key`,
     `CREATE UNIQUE INDEX IF NOT EXISTS customer_domains_org_domain_key ON customer_domains (organization_id, LOWER(domain))`,
+    `ALTER TABLE suppression_list ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'suppressed'`,
+    `ALTER TABLE suppression_list ADD COLUMN IF NOT EXISTS first_seen TIMESTAMP NOT NULL DEFAULT NOW()`,
+    `ALTER TABLE suppression_list ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP NOT NULL DEFAULT NOW()`,
+    `ALTER TABLE suppression_list ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`,
+    `CREATE INDEX IF NOT EXISTS idx_suppression_status ON suppression_list(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_suppression_expires_at ON suppression_list(expires_at)`,
   ];
   const client = await getPool().connect();
   try {

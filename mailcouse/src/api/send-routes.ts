@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { query } from '../db/connection';
 import { getDKIMPrivateKey } from '../dkim/key-store';
 import { checkWarmupGate } from '../warmup/gate';
+import { verifyRecipient } from '../verification';
 
 const router = Router();
 
@@ -22,6 +23,20 @@ router.post('/', async (req: Request, res: Response) => {
     const { to, subject, body, from_name, tier } = req.body;
     if (!to || !subject || !body) {
       return res.status(400).json({ error: 'to, subject, and body required' });
+    }
+
+    // Pre-send email recipient verification layer (AfterShip engine + suppression + caching)
+    const verification = await verifyRecipient(to);
+    if (!verification.allowed) {
+      const statusCode = verification.source === 'suppression' ? 403 : 422;
+      return res.status(statusCode).json({
+        success: false,
+        error: `Verification rejected: ${verification.reason}`,
+        decision: verification.decision,
+        reason: verification.reason,
+        suggestion: verification.suggestion ? `Did you mean ${to.split('@')[0]}@${verification.suggestion}?` : null,
+        duration_ms: Date.now() - startTime,
+      });
     }
 
     const validTier = ['mass_mail', 'personal', 'transactional'].includes(tier) ? tier : 'mass_mail';
@@ -59,18 +74,6 @@ router.post('/', async (req: Request, res: Response) => {
     mxRecords.sort((a, b) => a.priority - b.priority);
 
     const keyData = await getDKIMPrivateKey(sub.id);
-
-    const supCheck = await query(
-      'SELECT reason FROM suppression_list WHERE email = $1',
-      [to.toLowerCase()]
-    );
-    if (supCheck.rows.length > 0) {
-      return res.status(403).json({
-        success: false, error: `Recipient suppressed: ${supCheck.rows[0].reason}`,
-        from: headerFrom, envelope_from: envelopeFrom, subdomain: sub.subdomain,
-        dkim: keyData ? 'signed' : 'unsigned', duration_ms: Date.now() - startTime,
-      });
-    }
 
     let lastError = '';
 

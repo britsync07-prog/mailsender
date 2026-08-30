@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { query } from '../db/connection';
 import { addToCache, removeFromCache } from './cache';
 import { AddSuppressionRequest, SuppressionEntry, SuppressionReason, SuppressionStats } from './types';
+import { isEntireFamousDomain } from '../verification/famous-domains';
 
 /**
  * Add email to suppression list
@@ -13,6 +14,16 @@ export async function addSuppression(
 ): Promise<SuppressionEntry> {
   const { email, reason, source_subdomain_id } = request;
   const normalizedEmail = email.toLowerCase().trim();
+
+  // Protect entire famous / most used domains (gmail.com, etc.) from domain-wide suppression
+  if (isEntireFamousDomain(normalizedEmail)) {
+    return {
+      id: 'exempt',
+      email: normalizedEmail,
+      reason,
+      suppressed_at: new Date(),
+    };
+  }
 
   // Check if already suppressed
   const existing = await query<{ id: string }>(

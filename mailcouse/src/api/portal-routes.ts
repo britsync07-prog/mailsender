@@ -25,6 +25,7 @@ import {
 import crypto from 'crypto';
 import * as dns from 'dns';
 import nodemailer from 'nodemailer';
+import { verifyRecipient } from '../verification';
 import {
   createMailboxAccount,
   ensureDefaultFolders,
@@ -513,6 +514,18 @@ async function deliverToRecipients(envelopeFrom: string, recipients: string[], r
   const results: { to: string; success: boolean; code: number; message: string }[] = [];
   for (const recipient of recipients) {
     try {
+      // Pre-send email recipient verification layer
+      const verification = await verifyRecipient(recipient);
+      if (!verification.allowed) {
+        results.push({
+          to: recipient,
+          success: false,
+          code: 550,
+          message: `Verification rejected: ${verification.reason}`,
+        });
+        continue;
+      }
+
       const domain = recipient.split('@')[1];
       if (!domain) { results.push({ to: recipient, success: false, code: 0, message: 'Invalid recipient' }); continue; }
       const mxRecords = await dns.promises.resolveMx(domain);
