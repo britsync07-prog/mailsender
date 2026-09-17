@@ -87,6 +87,7 @@ function formatFlags(flags: string[]): string {
 }
 
 function write(socket: net.Socket, line: string): void {
+  console.log(`[MAILCOUSE IMAP >> SEND] [${socket.remoteAddress || 'local'}:${socket.remotePort || 0}] ${line}`);
   socket.write(`${line}\r\n`);
 }
 
@@ -97,6 +98,7 @@ function getTlsOptions(): { key: Buffer; cert: Buffer } | null {
 }
 
 async function handleCommand(socket: net.Socket, state: ImapSessionState, line: string, startTls?: (tag: string) => void): Promise<void> {
+  console.log(`[MAILCOUSE IMAP << RECV] [${socket.remoteAddress || 'local'}:${socket.remotePort || 0}] ${line}`);
   const { tag, command, rest } = splitCommand(line);
   if (!command) return write(socket, `${tag} BAD Invalid command`);
 
@@ -173,10 +175,10 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
       ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
       : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
 
+    console.log(`[MAILCOUSE IMAP FETCH] folder=${state.selected!.name} isUid=${isUid} range=${rangeStr} matched=${matched.length}/${messages.length}`);
+
     for (const { seq, msg } of matched) {
-      const attrs = isUid
-        ? `UID ${msg.uid} FLAGS ${formatFlags(msg.flags)} RFC822.SIZE ${msg.size} BODY[] {${Buffer.byteLength(msg.raw_source)}}`
-        : `FLAGS ${formatFlags(msg.flags)} RFC822.SIZE ${msg.size} BODY[] {${Buffer.byteLength(msg.raw_source)}}`;
+      const attrs = `UID ${msg.uid} FLAGS ${formatFlags(msg.flags)} RFC822.SIZE ${msg.size} BODY[] {${Buffer.byteLength(msg.raw_source)}}`;
       write(socket, `* ${seq} FETCH (${attrs}`);
       socket.write(msg.raw_source);
       socket.write('\r\n)\r\n');
@@ -198,6 +200,8 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     const matched = isUid
       ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
       : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+
+    console.log(`[MAILCOUSE IMAP STORE] Folder: ${state.selected!.name}, range: ${rangeStr}, mode: ${mode}, flags: [${newFlags.join(' ')}], matched: ${matched.length}/${messages.length}`);
 
     for (const { seq, msg } of matched) {
       let flags = msg.flags || [];
@@ -236,7 +240,10 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     const targetFolderName = parseFolderName(targetFolderPart);
 
     const targetFolder = await getFolder(state.user.id, targetFolderName);
-    if (!targetFolder) return write(socket, `${tag} [TRYCREATE] Mailbox does not exist`);
+    if (!targetFolder) {
+      console.warn(`[MAILCOUSE IMAP MOVE] Target folder not found: "${targetFolderName}" for user ${state.user.email}`);
+      return write(socket, `${tag} NO [TRYCREATE] Mailbox does not exist`);
+    }
 
     const messages = await listMessagesBySequence(state.selected!.id);
     const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
@@ -246,12 +253,19 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
       ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
       : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
 
-    // Failsafe: if sequence-based MOVE matched nothing, check if rangeStr matches msg.uid
+    // Failsafe 1: if sequence-based MOVE matched nothing, check if rangeStr matches msg.uid
     if (!isUid && matched.length === 0) {
       matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid));
     }
+    // Failsafe 2: if UID MOVE matched nothing, check if rangeStr matches seq
+    if (isUid && matched.length === 0) {
+      matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+    }
+
+    console.log(`[MAILCOUSE IMAP MOVE] Selected: ${state.selected!.name}, Target: ${targetFolder.name}, Range: ${rangeStr}, isUid: ${isUid}, Matched: ${matched.length}/${messages.length}`);
 
     if (matched.length === 0) {
+      console.log(`[MAILCOUSE IMAP MOVE] No matching messages found for range ${rangeStr}`);
       return write(socket, `${tag} OK MOVE completed`);
     }
 
@@ -262,6 +276,10 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     const sortedDesc = [...matched].sort((a, b) => b.seq - a.seq);
     for (const item of sortedDesc) {
       write(socket, `* ${item.seq} EXPUNGE`);
+    }
+
+    if (moved.length === 0) {
+      return write(socket, `${tag} OK MOVE completed`);
     }
 
     const srcUids = moved.map((m) => m.sourceUid).join(',');
@@ -279,7 +297,10 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     const targetFolderName = parseFolderName(targetFolderPart);
 
     const targetFolder = await getFolder(state.user.id, targetFolderName);
-    if (!targetFolder) return write(socket, `${tag} [TRYCREATE] Mailbox does not exist`);
+    if (!targetFolder) {
+      console.warn(`[MAILCOUSE IMAP COPY] Target folder not found: "${targetFolderName}" for user ${state.user.email}`);
+      return write(socket, `${tag} NO [TRYCREATE] Mailbox does not exist`);
+    }
 
     const messages = await listMessagesBySequence(state.selected!.id);
     const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
@@ -292,6 +313,11 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     if (!isUid && matched.length === 0) {
       matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid));
     }
+    if (isUid && matched.length === 0) {
+      matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+    }
+
+    console.log(`[MAILCOUSE IMAP COPY] Selected: ${state.selected!.name}, Target: ${targetFolder.name}, Range: ${rangeStr}, isUid: ${isUid}, Matched: ${matched.length}/${messages.length}`);
 
     if (matched.length === 0) {
       return write(socket, `${tag} OK COPY completed`);
@@ -299,6 +325,10 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
 
     const uidsToCopy = matched.map((m) => m.msg.uid);
     const copied = await copyMessages(state.user.id, state.selected!.id, targetFolder.id, uidsToCopy);
+
+    if (copied.length === 0) {
+      return write(socket, `${tag} OK COPY completed`);
+    }
 
     const srcUids = copied.map((m) => m.sourceUid).join(',');
     const dstUids = copied.map((m) => m.destUid).join(',');
@@ -317,6 +347,8 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
         .filter((m) => matchesRange(m.uid, expungeRest, maxUid))
         .map((m) => m.uid);
     }
+
+    console.log(`[MAILCOUSE IMAP EXPUNGE] Folder: ${state.selected!.name}, isUid: ${isUid}, targetUids: ${targetUids ? targetUids.join(',') : 'ALL'}`);
 
     const deletedUids = await expungeMessages(state.selected!.id, targetUids);
     const deletedUidSet = new Set(deletedUids);

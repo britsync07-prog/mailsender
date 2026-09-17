@@ -178,9 +178,15 @@ export async function listFolders(mailboxId: string): Promise<MailboxFolder[]> {
 
 export async function getFolder(mailboxId: string, folderName: string): Promise<MailboxFolder | null> {
   await ensureDefaultFolders(mailboxId);
+  const cleanName = (folderName || 'INBOX').replace(/^INBOX[./]/i, '').trim();
   const result = await query<MailboxFolder>(
-    'SELECT id, mailbox_id, name, special_use, uid_validity, uid_next FROM mailbox_folders WHERE mailbox_id = $1 AND LOWER(name) = LOWER($2)',
-    [mailboxId, folderName || 'INBOX']
+    `SELECT id, mailbox_id, name, special_use, uid_validity, uid_next 
+     FROM mailbox_folders 
+     WHERE mailbox_id = $1 
+       AND (LOWER(name) = LOWER($2) OR LOWER(name) = LOWER($3) OR LOWER(special_use) = LOWER($4))
+     ORDER BY CASE WHEN LOWER(name) = LOWER($2) THEN 0 ELSE 1 END
+     LIMIT 1`,
+    [mailboxId, folderName || 'INBOX', cleanName || 'INBOX', `\\${cleanName || folderName}`]
   );
   return result.rows[0] || null;
 }
@@ -291,6 +297,7 @@ export async function moveMessages(
   targetFolderId: string,
   uids: number[]
 ): Promise<Array<{ sourceUid: number; destUid: number }>> {
+  console.log('[MAILCOUSE DB moveMessages:START]', { mailboxId, sourceFolderId, targetFolderId, uids });
   if (!uids || uids.length === 0) return [];
   return transaction(async (client) => {
     const msgsResult = await client.query<MailboxMessage>(
@@ -298,6 +305,7 @@ export async function moveMessages(
       [sourceFolderId, uids]
     );
     const msgs = msgsResult.rows;
+    console.log('[MAILCOUSE DB moveMessages:FOUND]', { count: msgs.length, uids: msgs.map((m) => m.uid) });
     if (msgs.length === 0) return [];
 
     const folderResult = await client.query<{ base_uid: number }>(
@@ -315,6 +323,7 @@ export async function moveMessages(
       );
       mapping.push({ sourceUid: msgs[i].uid, destUid });
     }
+    console.log('[MAILCOUSE DB moveMessages:SUCCESS]', { movedCount: mapping.length, mapping });
     return mapping;
   });
 }
@@ -325,6 +334,7 @@ export async function copyMessages(
   targetFolderId: string,
   uids: number[]
 ): Promise<Array<{ sourceUid: number; destUid: number }>> {
+  console.log('[MAILCOUSE DB copyMessages:START]', { mailboxId, sourceFolderId, targetFolderId, uids });
   if (!uids || uids.length === 0) return [];
   return transaction(async (client) => {
     const msgsResult = await client.query<MailboxMessage>(
@@ -332,6 +342,7 @@ export async function copyMessages(
       [sourceFolderId, uids]
     );
     const msgs = msgsResult.rows;
+    console.log('[MAILCOUSE DB copyMessages:FOUND]', { count: msgs.length, uids: msgs.map((m) => m.uid) });
     if (msgs.length === 0) return [];
 
     const folderResult = await client.query<{ base_uid: number }>(
@@ -366,11 +377,13 @@ export async function copyMessages(
       );
       mapping.push({ sourceUid: m.uid, destUid });
     }
+    console.log('[MAILCOUSE DB copyMessages:SUCCESS]', { copiedCount: mapping.length, mapping });
     return mapping;
   });
 }
 
 export async function expungeMessages(folderId: string, uids?: number[]): Promise<number[]> {
+  console.log('[MAILCOUSE DB expungeMessages:START]', { folderId, uids });
   let sql = 'DELETE FROM mailbox_messages WHERE folder_id = $1 AND flags @> ARRAY[\'\\\\Deleted\']::TEXT[]';
   const params: any[] = [folderId];
   if (uids && uids.length > 0) {
@@ -379,16 +392,24 @@ export async function expungeMessages(folderId: string, uids?: number[]): Promis
   }
   sql += ' RETURNING uid';
   const result = await query<{ uid: number }>(sql, params);
-  return result.rows.map((r) => r.uid);
+  const deletedUids = result.rows.map((r) => r.uid);
+  console.log('[MAILCOUSE DB expungeMessages:SUCCESS]', { deletedCount: deletedUids.length, deletedUids });
+  return deletedUids;
 }
 
 export async function deleteMessageByUid(folderId: string, uid: number): Promise<boolean> {
+  console.log('[MAILCOUSE DB deleteMessageByUid:START]', { folderId, uid });
   const result = await query('DELETE FROM mailbox_messages WHERE folder_id = $1 AND uid = $2', [folderId, uid]);
-  return (result.rowCount ?? 0) > 0;
+  const deleted = (result.rowCount ?? 0) > 0;
+  console.log('[MAILCOUSE DB deleteMessageByUid:RESULT]', { folderId, uid, deleted });
+  return deleted;
 }
 
 export async function deleteMessageById(mailboxId: string, messageId: string): Promise<boolean> {
+  console.log('[MAILCOUSE DB deleteMessageById:START]', { mailboxId, messageId });
   const result = await query('DELETE FROM mailbox_messages WHERE mailbox_id = $1 AND id = $2', [mailboxId, messageId]);
-  return (result.rowCount ?? 0) > 0;
+  const deleted = (result.rowCount ?? 0) > 0;
+  console.log('[MAILCOUSE DB deleteMessageById:RESULT]', { mailboxId, messageId, deleted });
+  return deleted;
 }
 
