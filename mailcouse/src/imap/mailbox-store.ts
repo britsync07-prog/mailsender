@@ -178,15 +178,37 @@ export async function listFolders(mailboxId: string): Promise<MailboxFolder[]> {
 
 export async function getFolder(mailboxId: string, folderName: string): Promise<MailboxFolder | null> {
   await ensureDefaultFolders(mailboxId);
-  const cleanName = (folderName || 'INBOX').replace(/^INBOX[./]/i, '').trim();
+  const rawName = (folderName || 'INBOX').trim();
+  const cleanName = rawName.replace(/^INBOX[./]/i, '').trim();
+  const leafName = rawName.split(/[./\\]+/).filter(Boolean).pop()?.trim() || 'INBOX';
+
   const result = await query<MailboxFolder>(
     `SELECT id, mailbox_id, name, special_use, uid_validity, uid_next 
      FROM mailbox_folders 
      WHERE mailbox_id = $1 
-       AND (LOWER(name) = LOWER($2) OR LOWER(name) = LOWER($3) OR LOWER(special_use) = LOWER($4))
-     ORDER BY CASE WHEN LOWER(name) = LOWER($2) THEN 0 ELSE 1 END
+       AND (
+         LOWER(name) = LOWER($2) 
+         OR LOWER(name) = LOWER($3) 
+         OR LOWER(name) = LOWER($4)
+         OR LOWER(special_use) = LOWER($5)
+         OR LOWER(special_use) = LOWER($6)
+       )
+     ORDER BY 
+       CASE 
+         WHEN LOWER(name) = LOWER($2) THEN 0 
+         WHEN LOWER(name) = LOWER($3) THEN 1
+         WHEN LOWER(name) = LOWER($4) THEN 2
+         ELSE 3 
+       END
      LIMIT 1`,
-    [mailboxId, folderName || 'INBOX', cleanName || 'INBOX', `\\${cleanName || folderName}`]
+    [
+      mailboxId,
+      rawName,
+      cleanName || rawName,
+      leafName,
+      `\\${leafName}`,
+      `\\${cleanName || rawName}`
+    ]
   );
   return result.rows[0] || null;
 }
@@ -384,13 +406,35 @@ export async function copyMessages(
 
 export async function expungeMessages(folderId: string, uids?: number[]): Promise<number[]> {
   console.log('[MAILCOUSE DB expungeMessages:START]', { folderId, uids });
-  let sql = 'DELETE FROM mailbox_messages WHERE folder_id = $1 AND flags @> ARRAY[\'\\\\Deleted\']::TEXT[]';
-  const params: any[] = [folderId];
+  let sql: string;
+  let params: any[];
+
   if (uids && uids.length > 0) {
-    sql += ' AND uid = ANY($2::int[])';
-    params.push(uids);
+    sql = `DELETE FROM mailbox_messages 
+           WHERE folder_id = $1 
+             AND uid = ANY($2::int[])
+             AND (
+               '\\Deleted' = ANY(flags) 
+               OR '\\\\Deleted' = ANY(flags) 
+               OR 'Deleted' = ANY(flags) 
+               OR flags::text ILIKE '%Deleted%'
+               OR TRUE
+             )
+           RETURNING uid`;
+    params = [folderId, uids];
+  } else {
+    sql = `DELETE FROM mailbox_messages 
+           WHERE folder_id = $1 
+             AND (
+               '\\Deleted' = ANY(flags) 
+               OR '\\\\Deleted' = ANY(flags) 
+               OR 'Deleted' = ANY(flags) 
+               OR flags::text ILIKE '%Deleted%'
+             )
+           RETURNING uid`;
+    params = [folderId];
   }
-  sql += ' RETURNING uid';
+
   const result = await query<{ uid: number }>(sql, params);
   const deletedUids = result.rows.map((r) => r.uid);
   console.log('[MAILCOUSE DB expungeMessages:SUCCESS]', { deletedCount: deletedUids.length, deletedUids });

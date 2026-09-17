@@ -56,6 +56,19 @@ function parseFolderName(rest: string): string {
   return rest.trim().split(/\s+/)[0] || 'INBOX';
 }
 
+function parseListArgs(rest: string): { ref: string; pattern: string } {
+  const parts: string[] = [];
+  const regex = /"([^"]*)"|(\S+)/g;
+  let match;
+  while ((match = regex.exec(rest)) !== null) {
+    parts.push(match[1] !== undefined ? match[1] : match[2]);
+  }
+  return {
+    ref: parts[0] ?? '',
+    pattern: parts[1] ?? '',
+  };
+}
+
 function parseFlags(input: string): string[] {
   const match = input.match(/\(([^)]*)\)/);
   if (!match) return [];
@@ -136,6 +149,13 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
   if (!state.user) return write(socket, `${tag} NO Authentication required`);
 
   if (command === 'LIST' || command === 'LSUB') {
+    const { pattern } = parseListArgs(rest);
+    // Delimiter probe (RFC 3501 § 6.3.8: empty mailbox argument returns delimiter)
+    if (pattern === '') {
+      write(socket, '* LIST (\\Noselect) "/" ""');
+      return write(socket, `${tag} OK ${command} completed`);
+    }
+
     const folders = await listFolders(state.user.id);
     for (const folder of folders) {
       const attrs = folder.special_use ? `(${folder.special_use})` : '()';
@@ -181,7 +201,7 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
       const attrs = `UID ${msg.uid} FLAGS ${formatFlags(msg.flags)} RFC822.SIZE ${msg.size} BODY[] {${Buffer.byteLength(msg.raw_source)}}`;
       write(socket, `* ${seq} FETCH (${attrs}`);
       socket.write(msg.raw_source);
-      socket.write('\r\n)\r\n');
+      socket.write(')\r\n');
     }
     return write(socket, `${tag} OK ${command} completed`);
   }
