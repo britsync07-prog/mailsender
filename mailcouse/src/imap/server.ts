@@ -4,12 +4,17 @@ import fs from 'fs';
 import {
   appendMessage,
   authenticateMailbox,
+  copyMessages,
+  deleteMessageByUid,
+  expungeMessages,
   getFolder,
   getFolderStats,
   listFolders,
   listMessagesBySequence,
   MailboxAccount,
   MailboxFolder,
+  MailboxMessage,
+  moveMessages,
   searchMessages,
   setMessageFlags,
 } from './mailbox-store';
@@ -57,22 +62,24 @@ function parseFlags(input: string): string[] {
   return match[1].split(/\s+/).map((f) => f.trim()).filter(Boolean);
 }
 
-function parseSequence(sequence: string, count: number): number[] {
-  if (!sequence || sequence === '*') return count ? [count] : [];
-  if (sequence === '1:*') return Array.from({ length: count }, (_, i) => i + 1);
-  const ids = new Set<number>();
-  for (const part of sequence.split(',')) {
-    if (part.includes(':')) {
-      const [aRaw, bRaw] = part.split(':');
-      const a = aRaw === '*' ? count : parseInt(aRaw, 10);
-      const b = bRaw === '*' ? count : parseInt(bRaw, 10);
-      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (i >= 1 && i <= count) ids.add(i);
+function matchesRange(val: number, rangeStr: string, maxVal: number): boolean {
+  if (!rangeStr || rangeStr === '*') return maxVal > 0 ? val === maxVal : false;
+  if (rangeStr === '1:*') return val >= 1 && (maxVal === 0 || val <= maxVal);
+  for (const part of rangeStr.split(',')) {
+    const trimmed = part.trim();
+    if (trimmed.includes(':')) {
+      const [aRaw, bRaw] = trimmed.split(':');
+      const a = aRaw === '*' ? maxVal : parseInt(aRaw, 10);
+      const b = bRaw === '*' ? maxVal : parseInt(bRaw, 10);
+      const min = Math.min(a, b);
+      const max = Math.max(a, b);
+      if (val >= min && val <= max) return true;
     } else {
-      const n = parseInt(part, 10);
-      if (n >= 1 && n <= count) ids.add(n);
+      const n = trimmed === '*' ? maxVal : parseInt(trimmed, 10);
+      if (val === n) return true;
     }
   }
-  return Array.from(ids).sort((a, b) => a - b);
+  return false;
 }
 
 function formatFlags(flags: string[]): string {
@@ -94,7 +101,7 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
   if (!command) return write(socket, `${tag} BAD Invalid command`);
 
   if (command === 'CAPABILITY') {
-    const caps = ['IMAP4rev1', 'AUTH=PLAIN', 'UIDPLUS', 'SPECIAL-USE'];
+    const caps = ['IMAP4rev1', 'AUTH=PLAIN', 'UIDPLUS', 'SPECIAL-USE', 'MOVE'];
     if (startTls && !state.secure && getTlsOptions()) caps.splice(1, 0, 'STARTTLS');
     write(socket, `* CAPABILITY ${caps.join(' ')}`);
     return write(socket, `${tag} OK CAPABILITY completed`);
@@ -149,54 +156,181 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     return write(socket, `${tag} OK [READ-WRITE] ${command} completed`);
   }
 
-  if (!state.selected && ['FETCH', 'UID', 'STORE', 'SEARCH'].includes(command)) {
+  if (!state.selected && ['FETCH', 'UID', 'STORE', 'SEARCH', 'MOVE', 'COPY', 'EXPUNGE'].includes(command)) {
     return write(socket, `${tag} NO Select a mailbox first`);
   }
 
   if (command === 'FETCH' || (command === 'UID' && rest.toUpperCase().startsWith('FETCH '))) {
-    const fetchRest = command === 'UID' ? rest.replace(/^FETCH\s+/i, '') : rest;
-    const seq = fetchRest.trim().split(/\s+/)[0];
+    const isUid = command === 'UID';
+    const fetchRest = isUid ? rest.replace(/^FETCH\s+/i, '') : rest;
+    const parts = fetchRest.trim().split(/\s+/);
+    const rangeStr = parts[0];
     const messages = await listMessagesBySequence(state.selected!.id);
-    const indexes = parseSequence(seq, messages.length);
-    for (const index of indexes) {
-      const msg = messages[index - 1];
-      if (!msg) continue;
-      const attrs = command === 'UID'
+    const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
+    const maxSeq = messages.length;
+
+    const matched = isUid
+      ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
+      : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+
+    for (const { seq, msg } of matched) {
+      const attrs = isUid
         ? `UID ${msg.uid} FLAGS ${formatFlags(msg.flags)} RFC822.SIZE ${msg.size} BODY[] {${Buffer.byteLength(msg.raw_source)}}`
         : `FLAGS ${formatFlags(msg.flags)} RFC822.SIZE ${msg.size} BODY[] {${Buffer.byteLength(msg.raw_source)}}`;
-      write(socket, `* ${index} FETCH (${attrs}`);
+      write(socket, `* ${seq} FETCH (${attrs}`);
       socket.write(msg.raw_source);
       socket.write('\r\n)\r\n');
     }
-    return write(socket, `${tag} OK FETCH completed`);
+    return write(socket, `${tag} OK ${command} completed`);
   }
 
   if (command === 'STORE' || (command === 'UID' && rest.toUpperCase().startsWith('STORE '))) {
-    const storeRest = command === 'UID' ? rest.replace(/^STORE\s+/i, '') : rest;
+    const isUid = command === 'UID';
+    const storeRest = isUid ? rest.replace(/^STORE\s+/i, '') : rest;
     const parts = storeRest.trim().split(/\s+/);
-    const seq = parts[0];
+    const rangeStr = parts[0];
     const mode = (parts[1] || '').toUpperCase();
     const newFlags = parseFlags(storeRest);
     const messages = await listMessagesBySequence(state.selected!.id);
-    const indexes = parseSequence(seq, messages.length);
-    for (const index of indexes) {
-      const msg = messages[index - 1];
-      if (!msg) continue;
+    const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
+    const maxSeq = messages.length;
+
+    const matched = isUid
+      ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
+      : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+
+    for (const { seq, msg } of matched) {
       let flags = msg.flags || [];
       if (mode.startsWith('+')) flags = Array.from(new Set([...flags, ...newFlags]));
       else if (mode.startsWith('-')) flags = flags.filter((f) => !newFlags.includes(f));
       else flags = newFlags;
       await setMessageFlags(state.selected!.id, msg.uid, flags);
-      write(socket, `* ${index} FETCH (FLAGS ${formatFlags(flags)})`);
+      const attrs = isUid
+        ? `UID ${msg.uid} FLAGS ${formatFlags(flags)}`
+        : `FLAGS ${formatFlags(flags)}`;
+      write(socket, `* ${seq} FETCH (${attrs})`);
     }
-    return write(socket, `${tag} OK STORE completed`);
+    return write(socket, `${tag} OK ${command} completed`);
   }
 
   if (command === 'SEARCH' || (command === 'UID' && rest.toUpperCase().startsWith('SEARCH '))) {
-    const searchRest = command === 'UID' ? rest.replace(/^SEARCH\s+/i, '') : rest;
+    const isUid = command === 'UID';
+    const searchRest = isUid ? rest.replace(/^SEARCH\s+/i, '') : rest;
     const textMatch = searchRest.match(/TEXT\s+"?([^"]+)"?/i);
-    const ids = await searchMessages(state.selected!.id, textMatch ? textMatch[1] : 'ALL');
-    return write(socket, `* SEARCH ${ids.join(' ')}\r\n${tag} OK SEARCH completed`);
+    const matchingUids = await searchMessages(state.selected!.id, textMatch ? textMatch[1] : 'ALL');
+    const messages = await listMessagesBySequence(state.selected!.id);
+    const uidSet = new Set(matchingUids);
+    const resultIds = isUid
+      ? matchingUids
+      : messages.map((m, i) => ({ seq: i + 1, uid: m.uid })).filter(({ uid }) => uidSet.has(uid)).map(({ seq }) => seq);
+    return write(socket, `* SEARCH ${resultIds.join(' ')}\r\n${tag} OK SEARCH completed`);
+  }
+
+  if (command === 'MOVE' || (command === 'UID' && rest.toUpperCase().startsWith('MOVE '))) {
+    const isUid = command === 'UID';
+    const moveRest = isUid ? rest.replace(/^MOVE\s+/i, '') : rest;
+    const firstSpace = moveRest.trim().indexOf(' ');
+    if (firstSpace === -1) return write(socket, `${tag} BAD MOVE requires sequence and mailbox name`);
+    const rangeStr = moveRest.trim().slice(0, firstSpace).trim();
+    const targetFolderPart = moveRest.trim().slice(firstSpace + 1).trim();
+    const targetFolderName = parseFolderName(targetFolderPart);
+
+    const targetFolder = await getFolder(state.user.id, targetFolderName);
+    if (!targetFolder) return write(socket, `${tag} [TRYCREATE] Mailbox does not exist`);
+
+    const messages = await listMessagesBySequence(state.selected!.id);
+    const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
+    const maxSeq = messages.length;
+
+    let matched = isUid
+      ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
+      : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+
+    // Failsafe: if sequence-based MOVE matched nothing, check if rangeStr matches msg.uid
+    if (!isUid && matched.length === 0) {
+      matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid));
+    }
+
+    if (matched.length === 0) {
+      return write(socket, `${tag} OK MOVE completed`);
+    }
+
+    const uidsToMove = matched.map((m) => m.msg.uid);
+    const moved = await moveMessages(state.user.id, state.selected!.id, targetFolder.id, uidsToMove);
+
+    // Untagged EXPUNGE in descending sequence order
+    const sortedDesc = [...matched].sort((a, b) => b.seq - a.seq);
+    for (const item of sortedDesc) {
+      write(socket, `* ${item.seq} EXPUNGE`);
+    }
+
+    const srcUids = moved.map((m) => m.sourceUid).join(',');
+    const dstUids = moved.map((m) => m.destUid).join(',');
+    return write(socket, `${tag} OK [COPYUID ${targetFolder.uid_validity} ${srcUids} ${dstUids}] MOVE completed`);
+  }
+
+  if (command === 'COPY' || (command === 'UID' && rest.toUpperCase().startsWith('COPY '))) {
+    const isUid = command === 'UID';
+    const copyRest = isUid ? rest.replace(/^COPY\s+/i, '') : rest;
+    const firstSpace = copyRest.trim().indexOf(' ');
+    if (firstSpace === -1) return write(socket, `${tag} BAD COPY requires sequence and mailbox name`);
+    const rangeStr = copyRest.trim().slice(0, firstSpace).trim();
+    const targetFolderPart = copyRest.trim().slice(firstSpace + 1).trim();
+    const targetFolderName = parseFolderName(targetFolderPart);
+
+    const targetFolder = await getFolder(state.user.id, targetFolderName);
+    if (!targetFolder) return write(socket, `${tag} [TRYCREATE] Mailbox does not exist`);
+
+    const messages = await listMessagesBySequence(state.selected!.id);
+    const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
+    const maxSeq = messages.length;
+
+    let matched = isUid
+      ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
+      : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+
+    if (!isUid && matched.length === 0) {
+      matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid));
+    }
+
+    if (matched.length === 0) {
+      return write(socket, `${tag} OK COPY completed`);
+    }
+
+    const uidsToCopy = matched.map((m) => m.msg.uid);
+    const copied = await copyMessages(state.user.id, state.selected!.id, targetFolder.id, uidsToCopy);
+
+    const srcUids = copied.map((m) => m.sourceUid).join(',');
+    const dstUids = copied.map((m) => m.destUid).join(',');
+    return write(socket, `${tag} OK [COPYUID ${targetFolder.uid_validity} ${srcUids} ${dstUids}] COPY completed`);
+  }
+
+  if (command === 'EXPUNGE' || (command === 'UID' && rest.toUpperCase().startsWith('EXPUNGE'))) {
+    const isUid = command === 'UID';
+    const expungeRest = isUid ? rest.replace(/^EXPUNGE\s*/i, '').trim() : '';
+    const messages = await listMessagesBySequence(state.selected!.id);
+    const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
+
+    let targetUids: number[] | undefined;
+    if (isUid && expungeRest) {
+      targetUids = messages
+        .filter((m) => matchesRange(m.uid, expungeRest, maxUid))
+        .map((m) => m.uid);
+    }
+
+    const deletedUids = await expungeMessages(state.selected!.id, targetUids);
+    const deletedUidSet = new Set(deletedUids);
+
+    const toExpunge = messages
+      .map((msg, i) => ({ seq: i + 1, uid: msg.uid }))
+      .filter(({ uid }) => deletedUidSet.has(uid))
+      .sort((a, b) => b.seq - a.seq);
+
+    for (const item of toExpunge) {
+      write(socket, `* ${item.seq} EXPUNGE`);
+    }
+
+    return write(socket, `${tag} OK ${isUid ? 'UID EXPUNGE' : 'EXPUNGE'} completed`);
   }
 
   if (command === 'APPEND') {

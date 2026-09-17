@@ -63,10 +63,32 @@
             <td><%= msg.subject || '(no subject)' %></td>
             <td><%= (msg.flags || []).join(' ') %></td>
             <td><%= new Date(msg.internal_date).toLocaleString() %></td>
-            <td><a class="button button--small" href="/portal/mailboxes/<%= mailbox.id %>/messages/<%= msg.id %>/source">Source</a></td>
+            <td>
+              <a class="button button--small" href="/portal/mailboxes/<%= mailbox.id %>/messages/<%= msg.id %>/source">Source</a>
+              <button class="button button--small button--danger" onclick="deleteMessage('<%= mailbox.id %>', '<%= msg.id %>')">Delete</button>
+            </td>
           </tr>
         <% }) %>
       </tbody>
     </table>
   <% } %>
 </div>
+<script>
+async function deleteMessage(mailboxId, messageId) {
+  if (!confirm('Are you sure you want to delete this message?')) return;
+  try {
+    const res = await fetch('/api/portal/mailboxes/' + mailboxId + '/messages/' + messageId, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer <%= token %>' }
+    });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      const data = await res.json().catch(function() { return {}; });
+      alert(data.error || 'Failed to delete message');
+    }
+  } catch (err) {
+    alert('Network error while deleting message');
+  }
+}
+</script>

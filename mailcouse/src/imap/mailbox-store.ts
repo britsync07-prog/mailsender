@@ -284,3 +284,111 @@ export async function searchMessages(folderId: string, term?: string): Promise<n
   );
   return result.rows.map((r) => r.uid);
 }
+
+export async function moveMessages(
+  mailboxId: string,
+  sourceFolderId: string,
+  targetFolderId: string,
+  uids: number[]
+): Promise<Array<{ sourceUid: number; destUid: number }>> {
+  if (!uids || uids.length === 0) return [];
+  return transaction(async (client) => {
+    const msgsResult = await client.query<MailboxMessage>(
+      'SELECT * FROM mailbox_messages WHERE folder_id = $1 AND uid = ANY($2::int[]) ORDER BY uid ASC',
+      [sourceFolderId, uids]
+    );
+    const msgs = msgsResult.rows;
+    if (msgs.length === 0) return [];
+
+    const folderResult = await client.query<{ base_uid: number }>(
+      'UPDATE mailbox_folders SET uid_next = uid_next + $1 WHERE id = $2 RETURNING uid_next - $1 as base_uid',
+      [msgs.length, targetFolderId]
+    );
+    const baseUid = folderResult.rows[0].base_uid;
+    const mapping: Array<{ sourceUid: number; destUid: number }> = [];
+
+    for (let i = 0; i < msgs.length; i++) {
+      const destUid = baseUid + i;
+      await client.query(
+        'UPDATE mailbox_messages SET folder_id = $1, uid = $2 WHERE id = $3',
+        [targetFolderId, destUid, msgs[i].id]
+      );
+      mapping.push({ sourceUid: msgs[i].uid, destUid });
+    }
+    return mapping;
+  });
+}
+
+export async function copyMessages(
+  mailboxId: string,
+  sourceFolderId: string,
+  targetFolderId: string,
+  uids: number[]
+): Promise<Array<{ sourceUid: number; destUid: number }>> {
+  if (!uids || uids.length === 0) return [];
+  return transaction(async (client) => {
+    const msgsResult = await client.query<MailboxMessage>(
+      'SELECT * FROM mailbox_messages WHERE folder_id = $1 AND uid = ANY($2::int[]) ORDER BY uid ASC',
+      [sourceFolderId, uids]
+    );
+    const msgs = msgsResult.rows;
+    if (msgs.length === 0) return [];
+
+    const folderResult = await client.query<{ base_uid: number }>(
+      'UPDATE mailbox_folders SET uid_next = uid_next + $1 WHERE id = $2 RETURNING uid_next - $1 as base_uid',
+      [msgs.length, targetFolderId]
+    );
+    const baseUid = folderResult.rows[0].base_uid;
+    const mapping: Array<{ sourceUid: number; destUid: number }> = [];
+
+    for (let i = 0; i < msgs.length; i++) {
+      const destUid = baseUid + i;
+      const m = msgs[i];
+      await client.query(
+        `INSERT INTO mailbox_messages
+           (mailbox_id, folder_id, uid, raw_source, headers_json, subject, from_text, to_text, body_text, body_html, internal_date, size, flags)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          mailboxId,
+          targetFolderId,
+          destUid,
+          m.raw_source,
+          (m as any).headers_json,
+          m.subject,
+          m.from_text,
+          m.to_text,
+          m.body_text,
+          m.body_html,
+          m.internal_date,
+          m.size,
+          m.flags || [],
+        ]
+      );
+      mapping.push({ sourceUid: m.uid, destUid });
+    }
+    return mapping;
+  });
+}
+
+export async function expungeMessages(folderId: string, uids?: number[]): Promise<number[]> {
+  let sql = 'DELETE FROM mailbox_messages WHERE folder_id = $1 AND flags @> ARRAY[\'\\\\Deleted\']::TEXT[]';
+  const params: any[] = [folderId];
+  if (uids && uids.length > 0) {
+    sql += ' AND uid = ANY($2::int[])';
+    params.push(uids);
+  }
+  sql += ' RETURNING uid';
+  const result = await query<{ uid: number }>(sql, params);
+  return result.rows.map((r) => r.uid);
+}
+
+export async function deleteMessageByUid(folderId: string, uid: number): Promise<boolean> {
+  const result = await query('DELETE FROM mailbox_messages WHERE folder_id = $1 AND uid = $2', [folderId, uid]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function deleteMessageById(mailboxId: string, messageId: string): Promise<boolean> {
+  const result = await query('DELETE FROM mailbox_messages WHERE mailbox_id = $1 AND id = $2', [mailboxId, messageId]);
+  return (result.rowCount ?? 0) > 0;
+}
+

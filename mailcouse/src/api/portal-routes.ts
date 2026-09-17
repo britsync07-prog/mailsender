@@ -28,6 +28,7 @@ import nodemailer from 'nodemailer';
 import { verifyRecipient } from '../verification';
 import {
   createMailboxAccount,
+  deleteMessageById,
   ensureDefaultFolders,
   isValidMailboxEmail,
   listFolders,
@@ -1303,6 +1304,21 @@ router.get('/mailboxes/:id/messages/:messageId/source', async (req: Request, res
     res.type('text/plain').send(result.rows[0].raw_source);
   } catch {
     res.status(500).send('Failed to load source');
+  }
+});
+
+router.delete('/mailboxes/:id/messages/:messageId', async (req: Request, res: Response) => {
+  try {
+    const mailboxId = String(req.params.id);
+    const messageId = String(req.params.messageId);
+    const mailbox = await query('SELECT id FROM mailbox_accounts WHERE id = $1 AND organization_id = $2', [mailboxId, req.user!.orgId!]);
+    if (mailbox.rows.length === 0) return res.status(404).json({ error: 'Mailbox not found' });
+    const deleted = await deleteMessageById(mailboxId, messageId);
+    if (!deleted) return res.status(404).json({ error: 'Message not found' });
+    res.json({ message: 'Message deleted' });
+  } catch (err) {
+    console.error('Delete message error:', err);
+    res.status(500).json({ error: 'Failed to delete message' });
   }
 });
 
