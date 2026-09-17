@@ -60,10 +60,16 @@
           <tr>
             <td><%= msg.uid %></td>
             <td><%= msg.from_text || '' %></td>
-            <td><%= msg.subject || '(no subject)' %></td>
+            <td>
+              <a href="/portal/mailboxes/<%= mailbox.id %>/messages/<%= msg.id %>"><%= msg.subject || '(no subject)' %></a>
+              <% if (msg.has_attachment || (msg.attachment_count && msg.attachment_count > 0)) { %>
+                <span title="<%= msg.attachment_count || 1 %> attachment(s)" style="display:inline-block; margin-left:6px; font-size:14px; cursor:default;">📎</span>
+              <% } %>
+            </td>
             <td><%= (msg.flags || []).join(' ') %></td>
             <td><%= new Date(msg.internal_date).toLocaleString() %></td>
             <td>
+              <a class="button button--small" href="/portal/mailboxes/<%= mailbox.id %>/messages/<%= msg.id %>">View</a>
               <a class="button button--small" href="/portal/mailboxes/<%= mailbox.id %>/messages/<%= msg.id %>/source">Source</a>
               <button class="button button--small button--danger" onclick="deleteMessage('<%= mailbox.id %>', '<%= msg.id %>')">Delete</button>
             </td>

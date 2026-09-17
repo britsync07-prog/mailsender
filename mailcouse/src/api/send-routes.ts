@@ -20,10 +20,28 @@ async function resolveMxIpv4(mxHost: string): Promise<string> {
 router.post('/', async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
-    const { to, subject, body, from_name, tier } = req.body;
+    const { to, subject, body, from_name, tier, attachments } = req.body;
     if (!to || !subject || !body) {
       return res.status(400).json({ error: 'to, subject, and body required' });
     }
+
+    const parsedAttachments = Array.isArray(attachments)
+      ? attachments.map((att: any) => {
+          const contentBuf = Buffer.isBuffer(att.content)
+            ? att.content
+            : typeof att.content === 'string'
+            ? Buffer.from(att.content, att.encoding === 'base64' || /^[A-Za-z0-9+/=]+$/.test(att.content) ? 'base64' : 'utf-8')
+            : Buffer.from('');
+          return {
+            filename: att.filename || 'attachment',
+            content: contentBuf,
+            contentType: att.contentType || 'application/octet-stream',
+            cid: att.cid,
+            disposition: att.disposition || 'attachment',
+          };
+        })
+      : [];
+    const hasAttachment = parsedAttachments.length > 0;
 
     // Pre-send email recipient verification layer (AfterShip engine + suppression + caching)
     const verification = await verifyRecipient(to);
@@ -100,20 +118,6 @@ router.post('/', async (req: Request, res: Response) => {
         );
         const leadId = leadRes.rows[0].id;
 
-        const sentMessageResult = await query(
-          `INSERT INTO sent_messages
-           (organization_id, subdomain_id, mail_from, rcpt_to, subject, message_id, status)
-           VALUES ((SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1), $1, $2, $3, $4, $5, 'processing')
-           RETURNING id`,
-          [sub.id, envelopeFrom, to.toLowerCase(), subject, msgId]
-        );
-        sentMessageId = sentMessageResult.rows[0].id;
-
-        await query(
-          'UPDATE leads SET send_count = send_count + 1 WHERE id = $1',
-          [leadId]
-        );
-
         const trackingUrl = `http://${req.hostname}`;
         const trackerGif = `${trackingUrl}/track/open/${leadId}.png`;
         const unsubscribeUrl = `${trackingUrl}/track/unsubscribe/${leadId}`;
@@ -126,6 +130,39 @@ ${body.replace(/\n/g, '<br>\n')}
 </p>
 </body></html>`;
 
+        const sentMessageResult = await query(
+          `INSERT INTO sent_messages
+           (organization_id, subdomain_id, mail_from, rcpt_to, subject, body_text, body_html, message_id, status, has_attachment, attachment_count)
+           VALUES ((SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1), $1, $2, $3, $4, $5, $6, $7, 'processing', $8, $9)
+           RETURNING id`,
+          [sub.id, envelopeFrom, to.toLowerCase(), subject, body, htmlBody, msgId, hasAttachment, parsedAttachments.length]
+        );
+        sentMessageId = sentMessageResult.rows[0].id;
+
+        if (hasAttachment) {
+          for (const att of parsedAttachments) {
+            await query(
+              `INSERT INTO message_attachments
+                 (sent_message_id, filename, content_type, size, disposition, content_id, data)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [
+                sentMessageId,
+                att.filename,
+                att.contentType,
+                att.content.length,
+                att.disposition,
+                att.cid || null,
+                att.content,
+              ]
+            );
+          }
+        }
+
+        await query(
+          'UPDATE leads SET send_count = send_count + 1 WHERE id = $1',
+          [leadId]
+        );
+
         const info = await transporter.sendMail({
           from: headerFrom,
           envelope: { from: envelopeFrom, to: [to] },
@@ -133,6 +170,7 @@ ${body.replace(/\n/g, '<br>\n')}
           subject,
           text: body,
           html: htmlBody,
+          attachments: parsedAttachments.length > 0 ? parsedAttachments : undefined,
           messageId: msgId,
           headers: {
             'List-Unsubscribe': `<mailto:unsubscribe@${sub.root_domain}>`,

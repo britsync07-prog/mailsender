@@ -606,6 +606,98 @@ app.get('/portal/mailboxes/:id/messages/:messageId/source', async (req, res) => 
   }
 });
 
+app.get('/portal/mailboxes/:id/messages/:messageId', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, mailboxRes, msgRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes/${req.params.id}/messages/${req.params.messageId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    if (!mailboxRes.ok || !msgRes.ok) return res.redirect(`/portal/mailboxes/${req.params.id}/messages`);
+    const [mailboxData, msgData] = await Promise.all([mailboxRes.json(), msgRes.json()]);
+    const header = await fetchServerHeader(token);
+    res.render('message-detail', {
+      layout: 'layout',
+      ...header,
+      msg: msgData.message,
+      mailbox: mailboxData.mailbox,
+      mailboxId: req.params.id,
+      isMailbox: true,
+      basePath: `/portal/mailboxes/${req.params.id}/messages/${req.params.messageId}`,
+      title: msgData.message.subject || 'Message',
+      active: 'mailboxes',
+      activeTab: 'properties',
+      humanSize,
+      parseHeaders,
+      email: userData.user?.email || '',
+      token,
+    });
+  } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/mailboxes/:id/messages/:messageId/attachments/:attachmentId/:action', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const action = req.params.action === 'view' ? 'view' : 'download';
+    const base = `http://localhost:${config.api.port}`;
+    const attRes = await fetch(`${base}/api/portal/mailboxes/${req.params.id}/messages/${req.params.messageId}/attachments/${req.params.attachmentId}/${action}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!attRes.ok) return res.status(attRes.status).send(await attRes.text());
+    for (const [k, v] of attRes.headers.entries()) {
+      if (['content-type', 'content-disposition', 'content-length'].includes(k.toLowerCase())) {
+        res.setHeader(k, v);
+      }
+    }
+    const buf = Buffer.from(await attRes.arrayBuffer());
+    res.send(buf);
+  } catch {
+    res.status(500).send('Failed to fetch attachment');
+  }
+});
+
+app.get('/portal/mailboxes/:id/messages/:messageId/:tab', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  const tabs = ['headers', 'plain', 'html', 'attachments', 'raw'];
+  if (!tabs.includes(req.params.tab)) return res.redirect(`/portal/mailboxes/${req.params.id}/messages/${req.params.messageId}`);
+  try {
+    const base = `http://localhost:${config.api.port}`;
+    const [userRes, mailboxRes, msgRes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes/${req.params.id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`${base}/api/portal/mailboxes/${req.params.id}/messages/${req.params.messageId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    ]);
+    if (userRes.status === 401) { res.clearCookie('token'); return res.redirect('/login'); }
+    const userData = await userRes.json();
+    if (!mailboxRes.ok || !msgRes.ok) return res.redirect(`/portal/mailboxes/${req.params.id}/messages`);
+    const [mailboxData, msgData] = await Promise.all([mailboxRes.json(), msgRes.json()]);
+    const header = await fetchServerHeader(token);
+    res.render('message-detail', {
+      layout: 'layout',
+      ...header,
+      msg: msgData.message,
+      mailbox: mailboxData.mailbox,
+      mailboxId: req.params.id,
+      isMailbox: true,
+      basePath: `/portal/mailboxes/${req.params.id}/messages/${req.params.messageId}`,
+      title: msgData.message.subject || 'Message',
+      active: 'mailboxes',
+      activeTab: req.params.tab,
+      humanSize,
+      parseHeaders,
+      email: userData.user?.email || '',
+      token,
+    });
+  } catch { res.redirect('/login'); }
+});
+
 app.get('/portal/messages', async (req, res) => {
   const token = getToken(req);
   if (!token) return res.redirect('/login');
@@ -763,8 +855,30 @@ app.get('/portal/messages/:id', async (req, res) => {
     if (!msgRes.ok) return res.redirect('/portal/messages');
     const data = await msgRes.json();
     const header = await fetchServerHeader(token);
-    res.render('message-detail', { layout: 'layout', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: 'properties', humanSize, parseHeaders, email: userData.user?.email || '', token });
+    res.render('message-detail', { layout: 'layout', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: 'properties', isMailbox: false, basePath: `/portal/messages/${req.params.id}`, humanSize, parseHeaders, email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
+});
+
+app.get('/portal/messages/:id/attachments/:attachmentId/:action', async (req, res) => {
+  const token = getToken(req);
+  if (!token) return res.redirect('/login');
+  try {
+    const action = req.params.action === 'view' ? 'view' : 'download';
+    const base = `http://localhost:${config.api.port}`;
+    const attRes = await fetch(`${base}/api/portal/messages/${req.params.id}/attachments/${req.params.attachmentId}/${action}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!attRes.ok) return res.status(attRes.status).send(await attRes.text());
+    for (const [k, v] of attRes.headers.entries()) {
+      if (['content-type', 'content-disposition', 'content-length'].includes(k.toLowerCase())) {
+        res.setHeader(k, v);
+      }
+    }
+    const buf = Buffer.from(await attRes.arrayBuffer());
+    res.send(buf);
+  } catch {
+    res.status(500).send('Failed to fetch attachment');
+  }
 });
 
 app.get('/portal/messages/:id/:tab', async (req, res) => {
@@ -783,7 +897,7 @@ app.get('/portal/messages/:id/:tab', async (req, res) => {
     if (!msgRes.ok) return res.redirect('/portal/messages');
     const data = await msgRes.json();
     const header = await fetchServerHeader(token);
-    res.render('message-detail', { layout: 'layout', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: req.params.tab, humanSize, parseHeaders, email: userData.user?.email || '', token });
+    res.render('message-detail', { layout: 'layout', ...header, msg: data.message, title: 'Message', active: 'messages', activeTab: req.params.tab, isMailbox: false, basePath: `/portal/messages/${req.params.id}`, humanSize, parseHeaders, email: userData.user?.email || '', token });
   } catch { res.redirect('/login'); }
 });
 

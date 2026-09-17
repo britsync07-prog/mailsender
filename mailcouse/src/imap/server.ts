@@ -1,6 +1,7 @@
 import net from 'net';
 import tls from 'tls';
 import fs from 'fs';
+import { simpleParser } from 'mailparser';
 import {
   appendMessage,
   authenticateMailbox,
@@ -19,18 +20,23 @@ import {
   setMessageFlags,
 } from './mailbox-store';
 import { config } from '../config';
+import {
+  formatImapEnvelope,
+  formatImapBodyStructure,
+  formatInternalDate,
+  extractMessageSection,
+} from './rfc3501-formatter';
 
 type ImapSessionState = {
   user: MailboxAccount | null;
   selected: MailboxFolder | null;
   secure: boolean;
-  buffer: string;
+  buffer: Buffer;
   pendingLiteral: null | {
     tag: string;
     folderName: string;
     flags: string[];
     bytes: number;
-    prefix: string;
   };
 };
 
@@ -110,6 +116,161 @@ function getTlsOptions(): { key: Buffer; cert: Buffer } | null {
   return key && cert ? { key, cert } : null;
 }
 
+function parseFetchTokens(input: string): string[] {
+  const trimmed = input.trim();
+  const content = trimmed.startsWith('(') && trimmed.endsWith(')') ? trimmed.slice(1, -1) : trimmed;
+  const tokens: string[] = [];
+  let current = '';
+  let parenDepth = 0;
+  let bracketDepth = 0;
+
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (ch === '(') parenDepth++;
+    else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
+    else if (ch === '[') bracketDepth++;
+    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+
+    if (/\s/.test(ch) && parenDepth === 0 && bracketDepth === 0) {
+      if (current.trim()) tokens.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) tokens.push(current.trim());
+  return tokens;
+}
+
+function expandFetchItems(tokens: string[]): string[] {
+  const expanded: string[] = [];
+  for (const token of tokens) {
+    const upper = token.toUpperCase();
+    if (upper === 'ALL') {
+      expanded.push('FLAGS', 'INTERNALDATE', 'RFC822.SIZE', 'ENVELOPE');
+    } else if (upper === 'FAST') {
+      expanded.push('FLAGS', 'INTERNALDATE', 'RFC822.SIZE');
+    } else if (upper === 'FULL') {
+      expanded.push('FLAGS', 'INTERNALDATE', 'RFC822.SIZE', 'ENVELOPE', 'BODY');
+    } else {
+      expanded.push(token);
+    }
+  }
+  return expanded;
+}
+
+const msgMetadataCache = new Map<string, { envelope: string; bodyStructure: string }>();
+
+async function getMessageMetadata(msg: MailboxMessage): Promise<{ envelope: string; bodyStructure: string }> {
+  const cached = msgMetadataCache.get(msg.id);
+  if (cached) return cached;
+  try {
+    const parsed = await simpleParser(Buffer.from(msg.raw_source));
+    const envelope = formatImapEnvelope(parsed);
+    const bodyStructure = formatImapBodyStructure(parsed, msg.raw_source);
+    const meta = { envelope, bodyStructure };
+    if (msgMetadataCache.size > 2000) {
+      const firstKey = msgMetadataCache.keys().next().value;
+      if (firstKey) msgMetadataCache.delete(firstKey);
+    }
+    msgMetadataCache.set(msg.id, meta);
+    return meta;
+  } catch (err) {
+    return {
+      envelope: `(NIL ${quote(msg.subject || '')} NIL NIL NIL NIL NIL NIL NIL NIL)`,
+      bodyStructure: `("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" ${msg.size} 1 NIL NIL NIL NIL)`,
+    };
+  }
+}
+
+async function sendFetchResponse(
+  socket: net.Socket,
+  seq: number,
+  msg: MailboxMessage,
+  requestedItems: string[],
+  isUidCommand: boolean,
+  folderId: string
+): Promise<void> {
+  const items = requestedItems.length > 0 ? requestedItems : ['FLAGS', 'RFC822.SIZE', 'BODY[]'];
+  const responseParts: string[] = [];
+  const literals: Array<{ label: string; content: string }> = [];
+  let markSeen = false;
+  let uidAdded = false;
+
+  if (isUidCommand) {
+    responseParts.push(`UID ${msg.uid}`);
+    uidAdded = true;
+  }
+
+  for (const item of items) {
+    const upper = item.toUpperCase();
+    if (upper === 'UID') {
+      if (!uidAdded) {
+        responseParts.push(`UID ${msg.uid}`);
+        uidAdded = true;
+      }
+    } else if (upper === 'FLAGS') {
+      responseParts.push(`FLAGS ${formatFlags(msg.flags)}`);
+    } else if (upper === 'INTERNALDATE') {
+      responseParts.push(`INTERNALDATE ${formatInternalDate(msg.internal_date)}`);
+    } else if (upper === 'RFC822.SIZE') {
+      responseParts.push(`RFC822.SIZE ${msg.size}`);
+    } else if (upper === 'ENVELOPE') {
+      const meta = await getMessageMetadata(msg);
+      responseParts.push(`ENVELOPE ${meta.envelope}`);
+    } else if (upper === 'BODYSTRUCTURE') {
+      const meta = await getMessageMetadata(msg);
+      responseParts.push(`BODYSTRUCTURE ${meta.bodyStructure}`);
+    } else if (upper === 'BODY') {
+      const meta = await getMessageMetadata(msg);
+      responseParts.push(`BODY ${meta.bodyStructure}`);
+    } else if (upper === 'RFC822') {
+      markSeen = true;
+      literals.push({ label: 'RFC822', content: msg.raw_source });
+    } else if (upper === 'RFC822.HEADER') {
+      const content = extractMessageSection(msg.raw_source, 'HEADER');
+      literals.push({ label: 'RFC822.HEADER', content });
+    } else if (upper === 'RFC822.TEXT') {
+      markSeen = true;
+      const content = extractMessageSection(msg.raw_source, 'TEXT');
+      literals.push({ label: 'RFC822.TEXT', content });
+    } else if (upper.startsWith('BODY[') || upper.startsWith('BODY.PEEK[')) {
+      const isPeek = upper.startsWith('BODY.PEEK[');
+      if (!isPeek) markSeen = true;
+      const match = item.match(/^BODY(?:\.PEEK)?\[(.*)\]$/i);
+      const section = match ? match[1] : '';
+      const content = extractMessageSection(msg.raw_source, section);
+      literals.push({ label: `BODY[${section}]`, content });
+    }
+  }
+
+  if (markSeen && !(msg.flags || []).includes('\\Seen')) {
+    const updatedFlags = Array.from(new Set([...(msg.flags || []), '\\Seen']));
+    msg.flags = updatedFlags;
+    await setMessageFlags(folderId, msg.uid, updatedFlags);
+  }
+
+  if (literals.length === 0) {
+    write(socket, `* ${seq} FETCH (${responseParts.join(' ')})`);
+  } else {
+    let prefix = `* ${seq} FETCH (`;
+    if (responseParts.length > 0) {
+      prefix += responseParts.join(' ') + ' ';
+    }
+    for (let l = 0; l < literals.length; l++) {
+      const lit = literals[l];
+      const byteLen = Buffer.byteLength(lit.content, 'utf8');
+      if (l === 0) {
+        socket.write(`${prefix}${lit.label} {${byteLen}}\r\n`);
+      } else {
+        socket.write(` ${lit.label} {${byteLen}}\r\n`);
+      }
+      socket.write(lit.content);
+    }
+    socket.write(')\r\n');
+  }
+}
+
 async function handleCommand(socket: net.Socket, state: ImapSessionState, line: string, startTls?: (tag: string) => void): Promise<void> {
   console.log(`[MAILCOUSE IMAP << RECV] [${socket.remoteAddress || 'local'}:${socket.remotePort || 0}] ${line}`);
   const { tag, command, rest } = splitCommand(line);
@@ -185,8 +346,13 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
   if (command === 'FETCH' || (command === 'UID' && rest.toUpperCase().startsWith('FETCH '))) {
     const isUid = command === 'UID';
     const fetchRest = isUid ? rest.replace(/^FETCH\s+/i, '') : rest;
-    const parts = fetchRest.trim().split(/\s+/);
-    const rangeStr = parts[0];
+    const firstSpace = fetchRest.trim().indexOf(' ');
+    const rangeStr = firstSpace !== -1 ? fetchRest.trim().slice(0, firstSpace) : fetchRest.trim();
+    const attPart = firstSpace !== -1 ? fetchRest.trim().slice(firstSpace + 1).trim() : '';
+
+    const tokens = parseFetchTokens(attPart);
+    const requestedItems = expandFetchItems(tokens);
+
     const messages = await listMessagesBySequence(state.selected!.id);
     const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
     const maxSeq = messages.length;
@@ -195,13 +361,10 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
       ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
       : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
 
-    console.log(`[MAILCOUSE IMAP FETCH] folder=${state.selected!.name} isUid=${isUid} range=${rangeStr} matched=${matched.length}/${messages.length}`);
+    console.log(`[MAILCOUSE IMAP FETCH] folder=${state.selected!.name} isUid=${isUid} range=${rangeStr} matched=${matched.length}/${messages.length} items=[${requestedItems.join(' ')}]`);
 
     for (const { seq, msg } of matched) {
-      const attrs = `UID ${msg.uid} FLAGS ${formatFlags(msg.flags)} RFC822.SIZE ${msg.size} BODY[] {${Buffer.byteLength(msg.raw_source)}}`;
-      write(socket, `* ${seq} FETCH (${attrs}`);
-      socket.write(msg.raw_source);
-      socket.write(')\r\n');
+      await sendFetchResponse(socket, seq, msg, requestedItems, isUid, state.selected!.id);
     }
     return write(socket, `${tag} OK ${command} completed`);
   }
@@ -393,7 +556,6 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
       folderName: parseFolderName(rest),
       flags: parseFlags(rest),
       bytes: parseInt(literal[1], 10),
-      prefix: '',
     };
     socket.write('+ Ready for literal data\r\n');
     return;
@@ -403,7 +565,7 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
 }
 
 function handleData(socket: net.Socket, state: ImapSessionState, chunk: Buffer, startTls?: (tag: string) => void): void {
-  state.buffer += chunk.toString('utf8');
+  state.buffer = Buffer.concat([state.buffer, chunk]);
   void processBuffer(socket, state, startTls).catch((err) => {
     console.error('IMAP command error:', err);
     write(socket, '* BAD Internal server error');
@@ -413,30 +575,35 @@ function handleData(socket: net.Socket, state: ImapSessionState, chunk: Buffer, 
 async function processBuffer(socket: net.Socket, state: ImapSessionState, startTls?: (tag: string) => void): Promise<void> {
   if (state.pendingLiteral) {
     const literal = state.pendingLiteral;
-    if (Buffer.byteLength(state.buffer) < literal.bytes) return;
-    const raw = state.buffer.slice(0, literal.bytes);
-    state.buffer = state.buffer.slice(literal.bytes).replace(/^\r?\n/, '');
+    if (state.buffer.length < literal.bytes) return;
+    const rawBuffer = state.buffer.subarray(0, literal.bytes);
+    state.buffer = state.buffer.subarray(literal.bytes);
+    if (state.buffer.length > 0 && state.buffer[0] === 13) state.buffer = state.buffer.subarray(1);
+    if (state.buffer.length > 0 && state.buffer[0] === 10) state.buffer = state.buffer.subarray(1);
+
     if (!state.user) {
       write(socket, `${literal.tag} NO Authentication required`);
     } else {
+      const raw = rawBuffer.toString('utf8');
       await appendMessage({ mailboxId: state.user.id, folderName: literal.folderName, flags: literal.flags, rawSource: raw });
       write(socket, `${literal.tag} OK APPEND completed`);
     }
     state.pendingLiteral = null;
   }
 
-  let index = state.buffer.indexOf('\n');
+  let index = state.buffer.indexOf(10);
   while (index >= 0 && !state.pendingLiteral) {
-    const line = state.buffer.slice(0, index).replace(/\r$/, '');
-    state.buffer = state.buffer.slice(index + 1);
+    const lineBuffer = state.buffer.subarray(0, index);
+    state.buffer = state.buffer.subarray(index + 1);
+    const line = lineBuffer.toString('utf8').replace(/\r$/, '');
     if (line.trim()) await handleCommand(socket, state, line, startTls);
-    index = state.buffer.indexOf('\n');
+    index = state.buffer.indexOf(10);
   }
 }
 
 export function createImapServer(implicitTls = false): net.Server | tls.Server {
   const listener = (socket: net.Socket) => {
-    const state: ImapSessionState = { user: null, selected: null, secure: implicitTls, buffer: '', pendingLiteral: null };
+    const state: ImapSessionState = { user: null, selected: null, secure: implicitTls, buffer: Buffer.alloc(0), pendingLiteral: null };
     let activeSocket: net.Socket = socket;
     let dataHandler: ((chunk: Buffer | string) => void) | null = null;
     const attachDataHandler = (target: net.Socket, startTls?: (tag: string) => void) => {

@@ -24,6 +24,19 @@ export type MailboxFolder = {
   uid_next: number;
 };
 
+export type MessageAttachment = {
+  id: string;
+  mailbox_message_id?: string | null;
+  sent_message_id?: string | null;
+  filename: string;
+  content_type: string;
+  size: number;
+  disposition?: string;
+  content_id?: string | null;
+  data?: Buffer | null;
+  created_at?: Date;
+};
+
 export type MailboxMessage = {
   id: string;
   mailbox_id: string;
@@ -38,6 +51,9 @@ export type MailboxMessage = {
   internal_date: Date;
   size: number;
   flags: string[];
+  has_attachment?: boolean;
+  attachment_count?: number;
+  attachments?: MessageAttachment[];
 };
 
 function addressText(value: any): string | null {
@@ -244,6 +260,8 @@ export async function appendMessage(input: {
   const folder = await getFolder(input.mailboxId, input.folderName || 'INBOX');
   if (!folder) throw new Error('Mailbox folder not found');
   const parsed = await simpleParser(Buffer.from(input.rawSource));
+  const hasAttachment = Boolean(parsed.attachments && parsed.attachments.length > 0);
+  const attachmentCount = parsed.attachments ? parsed.attachments.length : 0;
   return transaction(async (client) => {
     const folderResult = await client.query<{ uid_next: number }>(
       'UPDATE mailbox_folders SET uid_next = uid_next + 1 WHERE id = $1 RETURNING uid_next - 1 as uid_next',
@@ -252,8 +270,8 @@ export async function appendMessage(input: {
     const uid = folderResult.rows[0].uid_next;
     const messageResult = await client.query<MailboxMessage>(
       `INSERT INTO mailbox_messages
-         (mailbox_id, folder_id, uid, raw_source, headers_json, subject, from_text, to_text, body_text, body_html, internal_date, size, flags)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()), $12, $13)
+         (mailbox_id, folder_id, uid, raw_source, headers_json, subject, from_text, to_text, body_text, body_html, internal_date, size, flags, has_attachment, attachment_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()), $12, $13, $14, $15)
        RETURNING *`,
       [
         input.mailboxId,
@@ -269,9 +287,31 @@ export async function appendMessage(input: {
         input.internalDate || null,
         Buffer.byteLength(input.rawSource),
         input.flags || [],
+        hasAttachment,
+        attachmentCount,
       ]
     );
-    return messageResult.rows[0];
+    const createdMessage = messageResult.rows[0];
+
+    if (hasAttachment && parsed.attachments) {
+      for (const att of parsed.attachments) {
+        await client.query(
+          `INSERT INTO message_attachments
+             (mailbox_message_id, filename, content_type, size, disposition, content_id, data)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            createdMessage.id,
+            att.filename || 'attachment',
+            att.contentType || 'application/octet-stream',
+            att.size || (att.content ? att.content.length : 0),
+            ((att as any).contentDisposition || (att as any).disposition || 'attachment'),
+            att.cid || null,
+            att.content || null,
+          ]
+        );
+      }
+    }
+    return createdMessage;
   });
 }
 
@@ -377,10 +417,11 @@ export async function copyMessages(
     for (let i = 0; i < msgs.length; i++) {
       const destUid = baseUid + i;
       const m = msgs[i];
-      await client.query(
+      const inserted = await client.query<{ id: string }>(
         `INSERT INTO mailbox_messages
-           (mailbox_id, folder_id, uid, raw_source, headers_json, subject, from_text, to_text, body_text, body_html, internal_date, size, flags)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+           (mailbox_id, folder_id, uid, raw_source, headers_json, subject, from_text, to_text, body_text, body_html, internal_date, size, flags, has_attachment, attachment_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         RETURNING id`,
         [
           mailboxId,
           targetFolderId,
@@ -395,8 +436,23 @@ export async function copyMessages(
           m.internal_date,
           m.size,
           m.flags || [],
+          Boolean(m.has_attachment),
+          m.attachment_count || 0,
         ]
       );
+      const newMsgId = inserted.rows[0].id;
+
+      if (m.has_attachment) {
+        await client.query(
+          `INSERT INTO message_attachments
+             (mailbox_message_id, filename, content_type, size, disposition, content_id, data)
+           SELECT $1, filename, content_type, size, disposition, content_id, data
+           FROM message_attachments
+           WHERE mailbox_message_id = $2`,
+          [newMsgId, m.id]
+        );
+      }
+
       mapping.push({ sourceUid: m.uid, destUid });
     }
     console.log('[MAILCOUSE DB copyMessages:SUCCESS]', { copiedCount: mapping.length, mapping });
@@ -456,4 +512,88 @@ export async function deleteMessageById(mailboxId: string, messageId: string): P
   console.log('[MAILCOUSE DB deleteMessageById:RESULT]', { mailboxId, messageId, deleted });
   return deleted;
 }
+
+export async function getMessageAttachments(messageId: string): Promise<MessageAttachment[]> {
+  const result = await query<MessageAttachment>(
+    `SELECT id, mailbox_message_id, sent_message_id, filename, content_type, size, disposition, content_id, created_at
+     FROM message_attachments
+     WHERE mailbox_message_id = $1
+     ORDER BY created_at ASC`,
+    [messageId]
+  );
+  return result.rows;
+}
+
+export async function getSentMessageAttachments(sentMessageId: string): Promise<MessageAttachment[]> {
+  const result = await query<MessageAttachment>(
+    `SELECT id, mailbox_message_id, sent_message_id, filename, content_type, size, disposition, content_id, created_at
+     FROM message_attachments
+     WHERE sent_message_id = $1
+     ORDER BY created_at ASC`,
+    [sentMessageId]
+  );
+  return result.rows;
+}
+
+export async function getAttachmentById(attachmentId: string): Promise<MessageAttachment | null> {
+  const result = await query<MessageAttachment>(
+    `SELECT * FROM message_attachments WHERE id = $1`,
+    [attachmentId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function getMailboxMessage(mailboxId: string, messageId: string): Promise<(MailboxMessage & { mailbox_email?: string; folder_name?: string }) | null> {
+  const result = await query<MailboxMessage & { mailbox_email?: string; folder_name?: string }>(
+    `SELECT mm.*, mf.name as folder_name, ma.email as mailbox_email
+     FROM mailbox_messages mm
+     JOIN mailbox_folders mf ON mf.id = mm.folder_id
+     JOIN mailbox_accounts ma ON ma.id = mm.mailbox_id
+     WHERE mm.id = $1 AND mm.mailbox_id = $2`,
+    [messageId, mailboxId]
+  );
+  if (result.rows.length === 0) return null;
+  const msg = result.rows[0];
+
+  let attachments = await getMessageAttachments(messageId);
+
+  // Fallback: If not in message_attachments yet, parse on the fly and backfill
+  if (attachments.length === 0 && msg.raw_source && (msg.raw_source.includes('multipart/') || msg.raw_source.includes('boundary='))) {
+    try {
+      const parsed = await simpleParser(Buffer.from(msg.raw_source));
+      if (parsed.attachments && parsed.attachments.length > 0) {
+        for (const att of parsed.attachments) {
+          const attRes = await query<MessageAttachment>(
+            `INSERT INTO message_attachments
+               (mailbox_message_id, filename, content_type, size, disposition, content_id, data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, mailbox_message_id, sent_message_id, filename, content_type, size, disposition, content_id, created_at`,
+            [
+              msg.id,
+              att.filename || 'attachment',
+              att.contentType || 'application/octet-stream',
+              att.size || (att.content ? att.content.length : 0),
+              ((att as any).contentDisposition || (att as any).disposition || 'attachment'),
+              att.cid || null,
+              att.content || null,
+            ]
+          );
+          attachments.push(attRes.rows[0]);
+        }
+        await query(
+          'UPDATE mailbox_messages SET has_attachment = true, attachment_count = $1 WHERE id = $2',
+          [parsed.attachments.length, msg.id]
+        );
+        msg.has_attachment = true;
+        msg.attachment_count = parsed.attachments.length;
+      }
+    } catch (err) {
+      console.warn('Failed to parse attachments on the fly for mailbox message:', err);
+    }
+  }
+
+  msg.attachments = attachments;
+  return msg;
+}
+
 

@@ -1,8 +1,11 @@
-<%- include('partials/server-header', { activeNav: 'messages', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
+<% var isMb = typeof isMailbox !== 'undefined' && isMailbox; %>
+<% var bPath = typeof basePath !== 'undefined' ? basePath : '/portal/messages/' + msg.id; %>
+<%- include('partials/server-header', { activeNav: isMb ? 'mailboxes' : 'messages', serverMode, serverName, totalDomains, unverifiedDomains, badDnsDomains, heldMessages, queuedMessages, bounceRate, diskUsed, outgoingPct, outgoingMessages, incomingMessages, messageRate, sendLimit }) %>
 <nav class="navBar">
   <ul>
     <li class="navBar__item"><a href="/portal/dashboard" class="navBar__link">Overview</a></li>
-    <li class="navBar__item"><a href="/portal/messages" class="navBar__link is-active">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/messages" class="navBar__link<%= !isMb ? ' is-active' : '' %>">Messages</a></li>
+    <li class="navBar__item"><a href="/portal/mailboxes" class="navBar__link<%= isMb ? ' is-active' : '' %>">Mailboxes</a></li>
     <li class="navBar__item"><a href="/portal/domains" class="navBar__link">Domains</a></li>
     <li class="navBar__item"><a href="/portal/routes" class="navBar__link">Routing</a></li>
     <li class="navBar__item"><a href="/portal/credentials" class="navBar__link">Credentials</a></li>
@@ -16,119 +19,184 @@
   <div class="messageHeader__details">
     <h1 class="messageHeader__subject"><%= msg.subject || 'No subject' %></h1>
     <dl class="messageHeader__meta">
-      <dt>From</dt><dd><%= msg.mail_from || 'none' %></dd>
-      <dt>To</dt><dd><%= msg.rcpt_to || 'none' %></dd>
-      <dt>Date</dt><dd><%= new Date(msg.created_at).toLocaleString() %></dd>
+      <dt>From</dt><dd><%= msg.from_text || msg.mail_from || 'none' %></dd>
+      <dt>To</dt><dd><%= msg.to_text || msg.rcpt_to || 'none' %></dd>
+      <dt>Date</dt><dd><%= new Date(msg.internal_date || msg.created_at).toLocaleString() %></dd>
     </dl>
   </div>
   <div class="messageHeader__actions">
-    <span class="label label--messageStatus-<%= (msg.status || 'pending').replace(/ /g, '_') %>"><%= msg.status || 'pending' %></span>
+    <span class="label label--messageStatus-<%= (msg.status || (isMb ? 'received' : 'pending')).replace(/ /g, '_') %>"><%= msg.status || (isMb ? 'received' : 'pending') %></span>
   </div>
 </div>
 <nav class="navBar navBar--tertiary">
   <ul>
-    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>" class="navBar__link<%= activeTab === 'properties' ? ' is-active' : '' %>">Properties</a></li>
-    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>/activity" class="navBar__link<%= activeTab === 'activity' ? ' is-active' : '' %>">Activity</a></li>
-    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>/headers" class="navBar__link<%= activeTab === 'headers' ? ' is-active' : '' %>">Headers</a></li>
-    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>/spam" class="navBar__link<%= activeTab === 'spam' ? ' is-active' : '' %>">Spam Checks</a></li>
-    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>/plain" class="navBar__link<%= activeTab === 'plain' ? ' is-active' : '' %>">Plain Text</a></li>
-    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>/html" class="navBar__link<%= activeTab === 'html' ? ' is-active' : '' %>">HTML</a></li>
-    <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>/attachments" class="navBar__link<%= activeTab === 'attachments' ? ' is-active' : '' %>">Attachments</a></li>
-    <% if (msg.raw_headers || msg.body_text || msg.body_html) { %>
-      <li class="navBar__item"><a href="/portal/messages/<%= msg.id %>/raw" class="navBar__link<%= activeTab === 'raw' ? ' is-active' : '' %>">Raw message</a></li>
+    <li class="navBar__item"><a href="<%= bPath %>" class="navBar__link<%= activeTab === 'properties' ? ' is-active' : '' %>">Properties</a></li>
+    <% if (!isMb) { %>
+      <li class="navBar__item"><a href="<%= bPath %>/activity" class="navBar__link<%= activeTab === 'activity' ? ' is-active' : '' %>">Activity</a></li>
+    <% } %>
+    <li class="navBar__item"><a href="<%= bPath %>/headers" class="navBar__link<%= activeTab === 'headers' ? ' is-active' : '' %>">Headers</a></li>
+    <% if (!isMb) { %>
+      <li class="navBar__item"><a href="<%= bPath %>/spam" class="navBar__link<%= activeTab === 'spam' ? ' is-active' : '' %>">Spam Checks</a></li>
+    <% } %>
+    <li class="navBar__item"><a href="<%= bPath %>/plain" class="navBar__link<%= activeTab === 'plain' ? ' is-active' : '' %>">Plain Text</a></li>
+    <li class="navBar__item"><a href="<%= bPath %>/html" class="navBar__link<%= activeTab === 'html' ? ' is-active' : '' %>">HTML</a></li>
+    <li class="navBar__item"><a href="<%= bPath %>/attachments" class="navBar__link<%= activeTab === 'attachments' ? ' is-active' : '' %>">Attachments<% if (msg.attachment_count > 0 || (msg.attachments && msg.attachments.length > 0)) { %> (<%= msg.attachment_count || msg.attachments.length %>)<% } %></a></li>
+    <% if (msg.raw_headers || msg.body_text || msg.body_html || msg.raw_source) { %>
+      <li class="navBar__item"><a href="<%= bPath %>/raw" class="navBar__link<%= activeTab === 'raw' ? ' is-active' : '' %>">Raw message</a></li>
     <% } %>
   </ul>
 </nav>
 <% if (activeTab === 'properties') { %>
 <div class="pageContent">
   <div class="messagePropertiesPage">
-    <div class="messagePropertiesPage__left">
-      <div class="messagePropertiesPage__propertyPair">
+    <% if (isMb) { %>
+      <div class="messagePropertiesPage__left">
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>Mailbox</dt>
+            <dd><a href="/portal/mailboxes/<%= mailboxId %>/messages" class="u-link"><%= msg.mailbox_email || (typeof mailbox !== 'undefined' ? mailbox.email : '') || 'Mailbox' %></a></dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Folder</dt>
+            <dd><%= msg.folder_name || 'INBOX' %></dd>
+          </dl>
+        </div>
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>UID</dt>
+            <dd><%= msg.uid %></dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Flags</dt>
+            <dd><span class="label"><%= (msg.flags || []).join(' ') || 'None' %></span></dd>
+          </dl>
+        </div>
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>Raw Message</dt>
+            <dd><%= msg.raw_source ? 'Available' : 'Removed' %></dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Message Size</dt>
+            <dd><%= msg.size ? humanSize(msg.size) : 'n/a' %></dd>
+          </dl>
+        </div>
         <dl class="messagePropertiesPage__property">
-          <dt>Spam Status</dt>
+          <dt>Attachments</dt>
           <dd>
-            <a href="/portal/messages/<%= msg.id %>/spam" class="u-link">
-              <span class="label label--large label--spamStatus-<%= msg.spam_status || 'not_checked' %>"><%= (msg.spam_status || 'not_checked').replace(/_/g, ' ').replace(/^./, function(c) { return c.toUpperCase(); }) %></span>
-            </a>
+            <% if (msg.attachment_count > 0 || (msg.attachments && msg.attachments.length > 0)) { %>
+              <a href="<%= bPath %>/attachments" class="u-link">📎 <%= msg.attachment_count || msg.attachments.length %> attached file(s)</a>
+            <% } else { %>
+              No attachments
+            <% } %>
           </dd>
         </dl>
-        <dl class="messagePropertiesPage__property">
-          <dt>Tag</dt>
-          <dd><%= msg.tag ? msg.tag : 'Not tagged' %></dd>
-        </dl>
       </div>
-      <div class="messagePropertiesPage__propertyPair">
-        <dl class="messagePropertiesPage__property">
-          <dt>Raw Message</dt>
-          <dd><%= (msg.raw_headers || msg.body_text || msg.body_html) ? 'Available' : 'Removed' %></dd>
-        </dl>
-        <dl class="messagePropertiesPage__property">
-          <dt>Message Size</dt>
-          <dd><%= msg.size ? humanSize(msg.size) : 'n/a' %></dd>
-        </dl>
-      </div>
-      <div class="messagePropertiesPage__propertyPair">
-        <% if (msg.scope === 'incoming') { %>
-          <dl class="messagePropertiesPage__property">
-            <dt>Route</dt>
-            <dd><%= msg.route_name || 'Unknown Route' %></dd>
-          </dl>
-          <dl class="messagePropertiesPage__property">
-            <dt>Domain</dt>
-            <dd><a href="/portal/domains" class="u-link"><%= msg.domain_name || 'Unknown Domain' %></a></dd>
-          </dl>
-        <% } else { %>
-          <dl class="messagePropertiesPage__property">
-            <dt>Credential</dt>
-            <dd><%= msg.credential_name || 'Unknown Credential' %></dd>
-          </dl>
-          <dl class="messagePropertiesPage__property">
-            <dt>Domain</dt>
-            <dd><a href="/portal/domains" class="u-link"><%= msg.domain_name || 'Unknown Domain' %></a></dd>
-          </dl>
-        <% } %>
-      </div>
-      <dl class="messagePropertiesPage__property">
-        <dt>Message ID</dt>
-        <dd><%= msg.message_id || 'No message ID' %></dd>
-      </dl>
-    </div>
-    <div class="messagePropertiesPage__right">
-      <ul class="deliveryList">
-        <li class="deliveryList__item deliveryList__item--header">
-          <p>This message can be redelivered as if it had just been received.</p>
-        </li>
-        <% if (!msg.deliveries || msg.deliveries.length === 0) { %>
+      <div class="messagePropertiesPage__right">
+        <ul class="deliveryList">
+          <li class="deliveryList__item deliveryList__item--header">
+            <p>Mailbox Message Actions</p>
+          </li>
           <li class="deliveryList__item">
-            <div class="noData noData--clean">
-              <h2 class="noData__text">No delivery attempts yet.</h2>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <% if (msg.attachment_count > 0 || (msg.attachments && msg.attachments.length > 0)) { %>
+                <a class="button button--positive" href="<%= bPath %>/attachments">View Attachments (<%= msg.attachment_count || msg.attachments.length %>)</a>
+              <% } %>
+              <a class="button" href="<%= bPath %>/raw">View Raw Source</a>
+              <a class="button" href="/portal/mailboxes/<%= mailboxId %>/messages">Back to <%= msg.folder_name || 'Messages' %></a>
             </div>
           </li>
-        <% } else { %>
-          <% (msg.deliveries || []).slice().reverse().forEach(function(delivery) { %>
+        </ul>
+      </div>
+    <% } else { %>
+      <div class="messagePropertiesPage__left">
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>Spam Status</dt>
+            <dd>
+              <a href="/portal/messages/<%= msg.id %>/spam" class="u-link">
+                <span class="label label--large label--spamStatus-<%= msg.spam_status || 'not_checked' %>"><%= (msg.spam_status || 'not_checked').replace(/_/g, ' ').replace(/^./, function(c) { return c.toUpperCase(); }) %></span>
+              </a>
+            </dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Tag</dt>
+            <dd><%= msg.tag ? msg.tag : 'Not tagged' %></dd>
+          </dl>
+        </div>
+        <div class="messagePropertiesPage__propertyPair">
+          <dl class="messagePropertiesPage__property">
+            <dt>Raw Message</dt>
+            <dd><%= (msg.raw_headers || msg.body_text || msg.body_html) ? 'Available' : 'Removed' %></dd>
+          </dl>
+          <dl class="messagePropertiesPage__property">
+            <dt>Message Size</dt>
+            <dd><%= msg.size ? humanSize(msg.size) : 'n/a' %></dd>
+          </dl>
+        </div>
+        <div class="messagePropertiesPage__propertyPair">
+          <% if (msg.scope === 'incoming') { %>
+            <dl class="messagePropertiesPage__property">
+              <dt>Route</dt>
+              <dd><%= msg.route_name || 'Unknown Route' %></dd>
+            </dl>
+            <dl class="messagePropertiesPage__property">
+              <dt>Domain</dt>
+              <dd><a href="/portal/domains" class="u-link"><%= msg.domain_name || 'Unknown Domain' %></a></dd>
+            </dl>
+          <% } else { %>
+            <dl class="messagePropertiesPage__property">
+              <dt>Credential</dt>
+              <dd><%= msg.credential_name || 'Unknown Credential' %></dd>
+            </dl>
+            <dl class="messagePropertiesPage__property">
+              <dt>Domain</dt>
+              <dd><a href="/portal/domains" class="u-link"><%= msg.domain_name || 'Unknown Domain' %></a></dd>
+            </dl>
+          <% } %>
+        </div>
+        <dl class="messagePropertiesPage__property">
+          <dt>Message ID</dt>
+          <dd><%= msg.message_id || 'No message ID' %></dd>
+        </dl>
+      </div>
+      <div class="messagePropertiesPage__right">
+        <ul class="deliveryList">
+          <li class="deliveryList__item deliveryList__item--header">
+            <p>This message can be redelivered as if it had just been received.</p>
+          </li>
+          <% if (!msg.deliveries || msg.deliveries.length === 0) { %>
             <li class="deliveryList__item">
-              <div class="deliveryList__top">
-                <div class="deliveryList__time"><%= new Date(delivery.timestamp).toLocaleString() %></div>
-                <div class="deliveryList__status">
-                  <span class="label label--large label--messageStatus-<%= (delivery.status || 'pending').replace(/ /g, '_') %>"><%= (delivery.status || 'pending').replace(/_/g, ' ').replace(/^./, function(c) { return c.toUpperCase(); }) %></span>
-                </div>
+              <div class="noData noData--clean">
+                <h2 class="noData__text">No delivery attempts yet.</h2>
               </div>
-              <% if (delivery.details) { %>
-                <p class="deliveryList__error"><%= delivery.details %></p>
-              <% } %>
-              <% if (delivery.log_id || delivery.output) { %>
-                <a href="javascript:void(0)" class="js-toggle js-tech-link deliveryList__techLink" data-element="js-tech-link, js-tech-output">Show technical details</a>
-                <div class="deliveryList__error deliveryList__error--output js-tech-output is-hidden">
-                  <% if (delivery.output) { %><p class="deliveryList__error--output-text"><%= delivery.output %></p><% } %>
-                  <% if (delivery.time) { %><p class="deliveryList__error--output-ref">Time: <%= delivery.time %>s</p><% } %>
-                  <% if (delivery.log_id) { %><p class="deliveryList__error--output-ref">Support Ref: <%= delivery.log_id %></p><% } %>
-                </div>
-              <% } %>
             </li>
-          <% }); %>
-        <% } %>
-      </ul>
-    </div>
+          <% } else { %>
+            <% (msg.deliveries || []).slice().reverse().forEach(function(delivery) { %>
+              <li class="deliveryList__item">
+                <div class="deliveryList__top">
+                  <div class="deliveryList__time"><%= new Date(delivery.timestamp).toLocaleString() %></div>
+                  <div class="deliveryList__status">
+                    <span class="label label--large label--messageStatus-<%= (delivery.status || 'pending').replace(/ /g, '_') %>"><%= (delivery.status || 'pending').replace(/_/g, ' ').replace(/^./, function(c) { return c.toUpperCase(); }) %></span>
+                  </div>
+                </div>
+                <% if (delivery.details) { %>
+                  <p class="deliveryList__error"><%= delivery.details %></p>
+                <% } %>
+                <% if (delivery.log_id || delivery.output) { %>
+                  <a href="javascript:void(0)" class="js-toggle js-tech-link deliveryList__techLink" data-element="js-tech-link, js-tech-output">Show technical details</a>
+                  <div class="deliveryList__error deliveryList__error--output js-tech-output is-hidden">
+                    <% if (delivery.output) { %><p class="deliveryList__error--output-text"><%= delivery.output %></p><% } %>
+                    <% if (delivery.time) { %><p class="deliveryList__error--output-ref">Time: <%= delivery.time %>s</p><% } %>
+                    <% if (delivery.log_id) { %><p class="deliveryList__error--output-ref">Support Ref: <%= delivery.log_id %></p><% } %>
+                  </div>
+                <% } %>
+              </li>
+            <% }); %>
+          <% } %>
+        </ul>
+      </div>
+    <% } %>
   </div>
 </div>
 <% } else if (activeTab === 'activity') { %>
@@ -155,7 +223,8 @@
   </ul>
 </div>
 <% } else if (activeTab === 'headers') { %>
-<% if (!msg.raw_headers) { %>
+<% var rawH = msg.raw_headers || (msg.raw_source ? msg.raw_source.split(/\r?\n\r?\n/)[0] : ''); %>
+<% if (!rawH) { %>
 <div class="pageContent pageContent--compact">
   <div class="noData noData--clean">
     <h2 class="noData__title">There are no headers for this message.</h2>
@@ -165,7 +234,7 @@
 <% } else { %>
 <div class="pageContent">
   <div class="headersList">
-    <% parseHeaders(msg.raw_headers).forEach(function(h) { %>
+    <% parseHeaders(rawH).forEach(function(h) { %>
       <dl class="headersList__item">
         <dt><%= h.key %></dt>
         <dd><%= h.value %></dd>
@@ -223,14 +292,44 @@
 <% } %>
 <% } else if (activeTab === 'attachments') { %>
 <div class="pageContent pageContent--compact">
-  <div class="noData noData--clean">
-    <h2 class="noData__title">There are no attachments for this message.</h2>
-    <p class="noData__text">This means that we no longer store the raw data for this e-mail or the e-mail just didn't have any attached files.</p>
-  </div>
+  <% if (!msg.attachments || msg.attachments.length === 0) { %>
+    <div class="noData noData--clean">
+      <h2 class="noData__title">There are no attachments for this message.</h2>
+      <p class="noData__text">This means that we no longer store the raw data for this e-mail or the e-mail just didn't have any attached files.</p>
+    </div>
+  <% } else { %>
+    <table class="table u-margin" style="width:100%;">
+      <thead>
+        <tr>
+          <th>Attachment</th>
+          <th>Type</th>
+          <th>Size</th>
+          <th style="text-align: right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% msg.attachments.forEach(function(att) { %>
+          <tr>
+            <td>
+              <strong>📎 <%= att.filename %></strong>
+            </td>
+            <td><span class="label"><%= att.content_type %></span></td>
+            <td><%= humanSize(att.size) %></td>
+            <td style="text-align: right;">
+              <% if (att.content_type && (att.content_type === 'application/pdf' || att.content_type.startsWith('image/'))) { %>
+                <a class="button button--small" target="_blank" href="<%= bPath %>/attachments/<%= att.id %>/view">Preview</a>
+              <% } %>
+              <a class="button button--small button--positive" href="<%= bPath %>/attachments/<%= att.id %>/download">Download</a>
+            </td>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  <% } %>
 </div>
 <% } else if (activeTab === 'raw') { %>
 <div class="pageContent pageContent--compact">
-  <pre class="codeBlock"><%= (msg.raw_headers || '') + '\n\n' + (msg.body_text || msg.body_html || '') %></pre>
+  <pre class="codeBlock"><%= msg.raw_source || ((msg.raw_headers || '') + '\n\n' + (msg.body_text || msg.body_html || '')) %></pre>
 </div>
 <% } %>
 <script>

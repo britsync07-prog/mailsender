@@ -35,6 +35,10 @@ import {
   listMessages,
   normalizeMailboxEmail,
   updateMailboxAccount,
+  getMailboxMessage,
+  getMessageAttachments,
+  getSentMessageAttachments,
+  getAttachmentById,
 } from '../imap/mailbox-store';
 
 const router = Router();
@@ -387,7 +391,7 @@ router.get('/dashboard', async (req: Request, res: Response) => {
     );
 
     const recentMessages = await query(
-      `SELECT id, mail_from, rcpt_to, subject, status, created_at
+      `SELECT id, mail_from, rcpt_to, subject, status, created_at, has_attachment, attachment_count
        FROM sent_messages
        WHERE organization_id = $1
        ORDER BY created_at DESC LIMIT 10`,
@@ -562,6 +566,21 @@ router.post('/send', async (req: Request, res: Response) => {
     const serverResult = await query('SELECT * FROM servers WHERE organization_id = $1', [orgId]);
     const server = serverResult.rows[0];
 
+    const parsedAttachments = Array.isArray(msgData.attachments)
+      ? msgData.attachments.map((att: any) => ({
+          filename: att.filename || 'attachment',
+          content: Buffer.isBuffer(att.content)
+            ? att.content
+            : typeof att.content === 'string'
+            ? Buffer.from(att.content, att.encoding === 'base64' || /^[A-Za-z0-9+/=]+$/.test(att.content) ? 'base64' : 'utf-8')
+            : Buffer.from(''),
+          contentType: att.contentType || 'application/octet-stream',
+          cid: att.cid,
+          disposition: att.disposition || 'attachment',
+        }))
+      : [];
+    const hasAttachment = parsedAttachments.length > 0;
+
     if (direction === 'incoming') {
       // Incoming message prototype — send to routes
       const from = msgData.from || 'test@example.com';
@@ -574,13 +593,33 @@ router.post('/send', async (req: Request, res: Response) => {
       let raw = `${receivedHeader}From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\n\r\n${plainBody}`;
 
       const msgResult = await query(
-        `INSERT INTO sent_messages (organization_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'incoming')
+        `INSERT INTO sent_messages (organization_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope, has_attachment, attachment_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'incoming', $10, $11)
          RETURNING id`,
-        [orgId, from, to, subject, plainBody, '', raw.length, 'sent', msgId]
+        [orgId, from, to, subject, plainBody, '', raw.length, 'sent', msgId, hasAttachment, parsedAttachments.length]
       );
 
-      return res.json({ id: msgResult.rows[0].id, token: msgId });
+      const messageId = msgResult.rows[0].id;
+      if (hasAttachment) {
+        for (const att of parsedAttachments) {
+          await query(
+            `INSERT INTO message_attachments
+               (sent_message_id, filename, content_type, size, disposition, content_id, data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              messageId,
+              att.filename,
+              att.contentType,
+              att.content.length,
+              att.disposition,
+              att.cid || null,
+              att.content,
+            ]
+          );
+        }
+      }
+
+      return res.json({ id: messageId, token: msgId });
     }
 
     // Outgoing message
@@ -611,25 +650,24 @@ router.post('/send', async (req: Request, res: Response) => {
 
     let rawMessage = `${receivedHeader}From: ${headerFrom}\r\nTo: ${to}\r\nSubject: ${subject}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${msgId}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${plainBody}`;
 
-    // DKIM sign (proper canonicalization via nodemailer)
+    // Build MIME message with nodemailer (DKIM signed if key exists)
     try {
       const keyData = await getDomainDKIMPrivateKey(customerDomain.id);
-      if (keyData) {
-        const capture = nodemailer.createTransport({
-          streamTransport: true,
-          buffer: true,
-          newline: '\r\n',
-          dkim: { domainName: customerDomain.domain, keySelector: keyData.selector, privateKey: keyData.privateKey },
-        });
-        const info = await capture.sendMail({
-          from: headerFrom, to, subject,
-          text: plainBody,
-          messageId: msgId,
-          date: new Date(),
-        });
-        rawMessage = receivedHeader + (info.message as Buffer).toString('utf-8');
-        capture.close();
-      }
+      const capture = nodemailer.createTransport({
+        streamTransport: true,
+        buffer: true,
+        newline: '\r\n',
+        dkim: keyData ? { domainName: customerDomain.domain, keySelector: keyData.selector, privateKey: keyData.privateKey } : undefined,
+      });
+      const info = await capture.sendMail({
+        from: headerFrom, to, subject,
+        text: plainBody,
+        attachments: parsedAttachments.length > 0 ? parsedAttachments : undefined,
+        messageId: msgId,
+        date: new Date(),
+      });
+      rawMessage = receivedHeader + (info.message as Buffer).toString('utf-8');
+      capture.close();
     } catch {}
 
     // Deliver to all recipients
@@ -638,13 +676,32 @@ router.post('/send', async (req: Request, res: Response) => {
 
     // Record in sent_messages
     const msgResult = await query(
-      `INSERT INTO sent_messages (organization_id, customer_domain_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'outgoing')
+      `INSERT INTO sent_messages (organization_id, customer_domain_id, mail_from, rcpt_to, subject, body_text, raw_headers, size, status, message_id, scope, has_attachment, attachment_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'outgoing', $11, $12)
        RETURNING id`,
-      [orgId, customerDomain.id, from, to, subject, plainBody, '', rawMessage.length, allSuccess ? 'accepted' : 'failed', msgId]
+      [orgId, customerDomain.id, from, to, subject, plainBody, '', rawMessage.length, allSuccess ? 'accepted' : 'failed', msgId, hasAttachment, parsedAttachments.length]
     );
 
     const messageId = msgResult.rows[0].id;
+
+    if (hasAttachment) {
+      for (const att of parsedAttachments) {
+        await query(
+          `INSERT INTO message_attachments
+             (sent_message_id, filename, content_type, size, disposition, content_id, data)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            messageId,
+            att.filename,
+            att.contentType,
+            att.content.length,
+            att.disposition,
+            att.cid || null,
+            att.content,
+          ]
+        );
+      }
+    }
 
     // Record delivery attempts
     for (const dr of deliveryResults) {
@@ -1322,6 +1379,107 @@ router.delete('/mailboxes/:id/messages/:messageId', async (req: Request, res: Re
   }
 });
 
+router.get('/mailboxes/:id/messages/:messageId', async (req: Request, res: Response) => {
+  try {
+    const mailboxId = String(req.params.id);
+    const messageId = String(req.params.messageId);
+    const mailbox = await query('SELECT id FROM mailbox_accounts WHERE id = $1 AND organization_id = $2', [mailboxId, req.user!.orgId!]);
+    if (mailbox.rows.length === 0) return res.status(404).json({ error: 'Mailbox not found' });
+
+    const message = await getMailboxMessage(mailboxId, messageId);
+    if (!message) return res.status(404).json({ error: 'Message not found' });
+
+    if (!message.flags || !message.flags.includes('\\Seen')) {
+      await query(
+        `UPDATE mailbox_messages
+         SET flags = array_append(flags, '\\Seen')
+         WHERE id = $1 AND NOT ('\\Seen' = ANY(flags))`,
+        [messageId]
+      );
+      message.flags = [...(message.flags || []), '\\Seen'];
+    }
+
+    res.json({ message });
+  } catch (err) {
+    console.error('Get mailbox message error:', err);
+    res.status(500).json({ error: 'Failed to get message' });
+  }
+});
+
+router.get('/mailboxes/:id/messages/:messageId/attachments/:attachmentId/download', async (req: Request, res: Response) => {
+  try {
+    const mailboxId = String(req.params.id);
+    const messageId = String(req.params.messageId);
+    const attachmentId = String(req.params.attachmentId);
+
+    const mailbox = await query('SELECT id FROM mailbox_accounts WHERE id = $1 AND organization_id = $2', [mailboxId, req.user!.orgId!]);
+    if (mailbox.rows.length === 0) return res.status(404).send('Mailbox not found');
+
+    const attachment = await getAttachmentById(attachmentId);
+    if (!attachment || attachment.mailbox_message_id !== messageId) {
+      return res.status(404).send('Attachment not found');
+    }
+
+    let fileData = attachment.data;
+    if (!fileData) {
+      const msgRes = await query<{ raw_source: string }>('SELECT raw_source FROM mailbox_messages WHERE id = $1', [messageId]);
+      if (msgRes.rows.length > 0) {
+        const { simpleParser } = require('mailparser');
+        const parsed = await simpleParser(Buffer.from(msgRes.rows[0].raw_source));
+        const found = (parsed.attachments || []).find((a: any) => a.filename === attachment.filename);
+        if (found && found.content) fileData = found.content;
+      }
+    }
+
+    if (!fileData) return res.status(404).send('Attachment data not found');
+
+    res.setHeader('Content-Type', attachment.content_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(attachment.filename)}"`);
+    res.setHeader('Content-Length', fileData.length);
+    res.send(fileData);
+  } catch (err) {
+    console.error('Download attachment error:', err);
+    res.status(500).send('Failed to download attachment');
+  }
+});
+
+router.get('/mailboxes/:id/messages/:messageId/attachments/:attachmentId/view', async (req: Request, res: Response) => {
+  try {
+    const mailboxId = String(req.params.id);
+    const messageId = String(req.params.messageId);
+    const attachmentId = String(req.params.attachmentId);
+
+    const mailbox = await query('SELECT id FROM mailbox_accounts WHERE id = $1 AND organization_id = $2', [mailboxId, req.user!.orgId!]);
+    if (mailbox.rows.length === 0) return res.status(404).send('Mailbox not found');
+
+    const attachment = await getAttachmentById(attachmentId);
+    if (!attachment || attachment.mailbox_message_id !== messageId) {
+      return res.status(404).send('Attachment not found');
+    }
+
+    let fileData = attachment.data;
+    if (!fileData) {
+      const msgRes = await query<{ raw_source: string }>('SELECT raw_source FROM mailbox_messages WHERE id = $1', [messageId]);
+      if (msgRes.rows.length > 0) {
+        const { simpleParser } = require('mailparser');
+        const parsed = await simpleParser(Buffer.from(msgRes.rows[0].raw_source));
+        const found = (parsed.attachments || []).find((a: any) => a.filename === attachment.filename);
+        if (found && found.content) fileData = found.content;
+      }
+    }
+
+    if (!fileData) return res.status(404).send('Attachment data not found');
+
+    res.setHeader('Content-Type', attachment.content_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(attachment.filename)}"`);
+    res.setHeader('Content-Length', fileData.length);
+    res.send(fileData);
+  } catch (err) {
+    console.error('View attachment error:', err);
+    res.status(500).send('Failed to view attachment');
+  }
+});
+
 router.get('/subdomains', async (req: Request, res: Response) => {
   try {
     const result = await query(
@@ -1475,6 +1633,7 @@ router.get('/messages', async (req: Request, res: Response) => {
     params.push(limit, offset);
     const messages = await query(
       `SELECT sm.id, sm.mail_from, sm.rcpt_to, sm.subject, sm.status, sm.bounce, sm.size, sm.scope, sm.created_at,
+              sm.has_attachment, sm.attachment_count,
               sc.name as credential_name
        FROM sent_messages sm
        LEFT JOIN smtp_credentials sc ON sc.id = sm.credential_id
@@ -1514,15 +1673,65 @@ router.get('/messages/:id', async (req: Request, res: Response) => {
     }
     const message = result.rows[0];
 
-    const deliveriesResult = await query(
-      `SELECT * FROM delivery_attempts WHERE sent_message_id = $1 ORDER BY timestamp DESC`,
-      [req.params.id]
-    );
+    const [deliveriesResult, attachments] = await Promise.all([
+      query(
+        `SELECT * FROM delivery_attempts WHERE sent_message_id = $1 ORDER BY timestamp DESC`,
+        [req.params.id]
+      ),
+      getSentMessageAttachments(String(req.params.id)),
+    ]);
     message.deliveries = deliveriesResult.rows;
+    message.attachments = attachments;
 
     res.json({ message });
   } catch {
     res.status(500).json({ error: 'Failed to get message' });
+  }
+});
+
+router.get('/messages/:id/attachments/:attachmentId/download', async (req: Request, res: Response) => {
+  try {
+    const messageId = String(req.params.id);
+    const attachmentId = String(req.params.attachmentId);
+
+    const msgRes = await query('SELECT id FROM sent_messages WHERE id = $1 AND organization_id = $2', [messageId, req.user!.orgId!]);
+    if (msgRes.rows.length === 0) return res.status(404).send('Message not found');
+
+    const attachment = await getAttachmentById(attachmentId);
+    if (!attachment || attachment.sent_message_id !== messageId || !attachment.data) {
+      return res.status(404).send('Attachment not found');
+    }
+
+    res.setHeader('Content-Type', attachment.content_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(attachment.filename)}"`);
+    res.setHeader('Content-Length', attachment.data.length);
+    res.send(attachment.data);
+  } catch (err) {
+    console.error('Download sent attachment error:', err);
+    res.status(500).send('Failed to download attachment');
+  }
+});
+
+router.get('/messages/:id/attachments/:attachmentId/view', async (req: Request, res: Response) => {
+  try {
+    const messageId = String(req.params.id);
+    const attachmentId = String(req.params.attachmentId);
+
+    const msgRes = await query('SELECT id FROM sent_messages WHERE id = $1 AND organization_id = $2', [messageId, req.user!.orgId!]);
+    if (msgRes.rows.length === 0) return res.status(404).send('Message not found');
+
+    const attachment = await getAttachmentById(attachmentId);
+    if (!attachment || attachment.sent_message_id !== messageId || !attachment.data) {
+      return res.status(404).send('Attachment not found');
+    }
+
+    res.setHeader('Content-Type', attachment.content_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(attachment.filename)}"`);
+    res.setHeader('Content-Length', attachment.data.length);
+    res.send(attachment.data);
+  } catch (err) {
+    console.error('View sent attachment error:', err);
+    res.status(500).send('Failed to view attachment');
   }
 });
 

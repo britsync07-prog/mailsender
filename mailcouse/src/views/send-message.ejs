@@ -70,6 +70,13 @@
         <label class="fieldSet__label" for="message_plain_body">Body</label>
         <div class="fieldSet__input"><textarea id="message_plain_body" class="input input--area"><%= message.plain_body %></textarea></div>
       </div>
+      <div class="fieldSet__field">
+        <label class="fieldSet__label" for="message_attachments">Attachments</label>
+        <div class="fieldSet__input">
+          <input type="file" id="message_attachments" class="input" multiple>
+          <p class="fieldSet__text">Optional. Select one or more files to attach to this message.</p>
+        </div>
+      </div>
     </div>
     <div class="fieldSetSubmit buttonSet">
       <button type="submit" class="button button--positive js-form-submit">Send Message</button>
@@ -82,6 +89,30 @@ document.getElementById('send-form').addEventListener('submit', async function(e
   var btn = this.querySelector('.js-form-submit');
   btn.textContent = 'Sending...'; btn.disabled = true;
   try {
+    var fileInput = document.getElementById('message_attachments');
+    var attachments = [];
+    if (fileInput && fileInput.files && fileInput.files.length > 0) {
+      for (var i = 0; i < fileInput.files.length; i++) {
+        var file = fileInput.files[i];
+        var base64 = await new Promise(function(resolve, reject) {
+          var reader = new FileReader();
+          reader.onload = function() {
+            var result = reader.result;
+            var commaIdx = result.indexOf(',');
+            resolve(commaIdx !== -1 ? result.slice(commaIdx + 1) : result);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        attachments.push({
+          filename: file.name,
+          contentType: file.type || 'application/octet-stream',
+          content: base64,
+          encoding: 'base64'
+        });
+      }
+    }
+
     var r = await fetch('/api/portal/send', {
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer <%= token %>'},
@@ -91,7 +122,8 @@ document.getElementById('send-form').addEventListener('submit', async function(e
           from: document.getElementById('message_from').value,
           to: document.getElementById('message_to').value,
           subject: document.getElementById('message_subject').value,
-          plain_body: document.getElementById('message_plain_body').value
+          plain_body: document.getElementById('message_plain_body').value,
+          attachments: attachments
         }
       })
     });

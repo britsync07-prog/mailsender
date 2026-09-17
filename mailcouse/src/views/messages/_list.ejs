@@ -3,7 +3,12 @@
     <li class="messageList__message">
       <a href="/portal/messages/<%= msg.id %>" class="messageList__link">
         <div class="messageList__details messageList__details--<%= msg.scope || 'outgoing' %>">
-          <p class="messageList__subject"><%= msg.subject || 'No subject' %></p>
+          <p class="messageList__subject">
+            <%= msg.subject || 'No subject' %>
+            <% if (msg.has_attachment || (msg.attachment_count && msg.attachment_count > 0)) { %>
+              <span title="<%= msg.attachment_count || 1 %> attachment(s)" style="display:inline-block; margin-left:6px; font-size:14px; cursor:default;">📎</span>
+            <% } %>
+          </p>
           <dl class="messageList__addresses">
             <dt>To</dt>
             <dd><% if (msg.rcpt_to_return_path) { %><span class="returnPathTag">Return Path</span><% } else { %><%= msg.rcpt_to || 'none' %><% } %></dd>

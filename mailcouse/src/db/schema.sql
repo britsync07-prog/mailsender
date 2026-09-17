@@ -590,6 +590,8 @@ CREATE TABLE IF NOT EXISTS mailbox_messages (
     internal_date TIMESTAMP NOT NULL DEFAULT NOW(),
     size INTEGER NOT NULL DEFAULT 0,
     flags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    has_attachment BOOLEAN NOT NULL DEFAULT false,
+    attachment_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE(folder_id, uid)
 );
@@ -633,6 +635,8 @@ CREATE TABLE IF NOT EXISTS sent_messages (
     spam_checks JSONB,
     bounce TEXT,
     size INTEGER DEFAULT 0,
+    has_attachment BOOLEAN NOT NULL DEFAULT false,
+    attachment_count INTEGER NOT NULL DEFAULT 0,
     sent_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -663,6 +667,25 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
 
 CREATE INDEX IF NOT EXISTS idx_delivery_attempts_sent_message_id ON delivery_attempts(sent_message_id);
 CREATE INDEX IF NOT EXISTS idx_delivery_attempts_org_id ON delivery_attempts(organization_id);
+
+-- ============================================================
+-- MESSAGE ATTACHMENTS (Inbound & Outbound)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS message_attachments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    mailbox_message_id UUID REFERENCES mailbox_messages(id) ON DELETE CASCADE,
+    sent_message_id UUID REFERENCES sent_messages(id) ON DELETE CASCADE,
+    filename VARCHAR(255) NOT NULL,
+    content_type VARCHAR(255) NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    disposition VARCHAR(50) DEFAULT 'attachment',
+    content_id VARCHAR(255),
+    data BYTEA,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_attachments_mailbox_msg ON message_attachments(mailbox_message_id);
+CREATE INDEX IF NOT EXISTS idx_message_attachments_sent_msg ON message_attachments(sent_message_id);
 CREATE INDEX IF NOT EXISTS idx_delivery_attempts_status ON delivery_attempts(status);
 
 CREATE TABLE IF NOT EXISTS sessions (

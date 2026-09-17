@@ -195,6 +195,24 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE suppression_list ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`,
     `CREATE INDEX IF NOT EXISTS idx_suppression_status ON suppression_list(status)`,
     `CREATE INDEX IF NOT EXISTS idx_suppression_expires_at ON suppression_list(expires_at)`,
+    `ALTER TABLE mailbox_messages ADD COLUMN IF NOT EXISTS has_attachment BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE mailbox_messages ADD COLUMN IF NOT EXISTS attachment_count INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE sent_messages ADD COLUMN IF NOT EXISTS has_attachment BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE sent_messages ADD COLUMN IF NOT EXISTS attachment_count INTEGER NOT NULL DEFAULT 0`,
+    `CREATE TABLE IF NOT EXISTS message_attachments (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      mailbox_message_id UUID REFERENCES mailbox_messages(id) ON DELETE CASCADE,
+      sent_message_id UUID REFERENCES sent_messages(id) ON DELETE CASCADE,
+      filename VARCHAR(255) NOT NULL,
+      content_type VARCHAR(255) NOT NULL,
+      size INTEGER NOT NULL DEFAULT 0,
+      disposition VARCHAR(50) DEFAULT 'attachment',
+      content_id VARCHAR(255),
+      data BYTEA,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_message_attachments_mailbox_msg ON message_attachments(mailbox_message_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_message_attachments_sent_msg ON message_attachments(sent_message_id)`,
   ];
   const client = await getPool().connect();
   try {
@@ -205,6 +223,57 @@ async function runMigrations(): Promise<void> {
   } finally {
     client.release();
   }
+  await backfillExistingAttachments();
+}
+
+export async function backfillExistingAttachments(): Promise<number> {
+  const { simpleParser } = require('mailparser');
+  let backfilled = 0;
+  try {
+    const candidateMessages = await query<{ id: string; raw_source: string }>(
+      `SELECT mm.id, mm.raw_source
+       FROM mailbox_messages mm
+       LEFT JOIN message_attachments ma ON ma.mailbox_message_id = mm.id
+       WHERE ma.id IS NULL
+         AND (mm.raw_source ILIKE '%multipart/%' OR mm.raw_source ILIKE '%content-disposition%')`
+    );
+
+    for (const msg of candidateMessages.rows) {
+      try {
+        const parsed = await simpleParser(Buffer.from(msg.raw_source));
+        if (parsed.attachments && parsed.attachments.length > 0) {
+          for (const att of parsed.attachments) {
+            await query(
+              `INSERT INTO message_attachments
+                 (mailbox_message_id, filename, content_type, size, disposition, content_id, data)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [
+                msg.id,
+                att.filename || 'attachment',
+                att.contentType || 'application/octet-stream',
+                att.size || (att.content ? att.content.length : 0),
+                att.disposition || 'attachment',
+                att.cid || null,
+                att.content || null,
+              ]
+            );
+          }
+          await query(
+            `UPDATE mailbox_messages
+             SET has_attachment = true, attachment_count = $1
+             WHERE id = $2`,
+            [parsed.attachments.length, msg.id]
+          );
+          backfilled++;
+        }
+      } catch (parseErr) {
+        console.warn(`Failed to backfill attachments for message ${msg.id}:`, parseErr);
+      }
+    }
+  } catch (err) {
+    console.warn('Attachment backfill skipped or encountered error:', err);
+  }
+  return backfilled;
 }
 
 export async function initializeDatabase(): Promise<void> {

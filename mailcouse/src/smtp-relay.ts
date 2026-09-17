@@ -246,6 +246,13 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
                   } : undefined,
                 });
 
+                const relayAttachments = (parsed.attachments || []).map((att) => ({
+                  filename: att.filename || 'attachment',
+                  content: att.content,
+                  contentType: att.contentType,
+                  cid: att.cid,
+                }));
+
                 const info = await transporter.sendMail({
                   from: headerFrom,
                   envelope: { from: envelopeFrom, to: [recipient] },
@@ -253,6 +260,7 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
                   subject,
                   text: parsed.text || '',
                   html: parsed.html || undefined,
+                  attachments: relayAttachments.length > 0 ? relayAttachments : undefined,
                   messageId: msgId,
                 });
 
@@ -276,9 +284,13 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
 
         // Record in database
         const allSuccess = results.every(r => r.success);
-        await query(
-          `INSERT INTO sent_messages (organization_id, credential_id, customer_domain_id, subdomain_id, mail_from, rcpt_to, subject, body_html, body_text, raw_headers, size, status, message_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        const hasAttachment = Boolean(parsed.attachments && parsed.attachments.length > 0);
+        const attachmentCount = parsed.attachments ? parsed.attachments.length : 0;
+
+        const sentMsgRes = await query<{ id: string }>(
+          `INSERT INTO sent_messages (organization_id, credential_id, customer_domain_id, subdomain_id, mail_from, rcpt_to, subject, body_html, body_text, raw_headers, size, status, message_id, has_attachment, attachment_count)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+           RETURNING id`,
           [
             authUser.organizationId, authUser.credentialId, customerDomain.id, sub.id,
             fromAddr, rcptTo.join(', '), subject,
@@ -286,8 +298,30 @@ export function createSmtpRelay(tier: string = 'mass_mail'): SMTPServer {
             JSON.stringify(parsed.headers || {}), size,
             allSuccess ? 'accepted' : 'failed',
             msgId,
+            hasAttachment,
+            attachmentCount,
           ]
         );
+
+        if (hasAttachment && parsed.attachments && sentMsgRes.rows.length > 0) {
+          const sentMessageId = sentMsgRes.rows[0].id;
+          for (const att of parsed.attachments) {
+            await query(
+              `INSERT INTO message_attachments
+                 (sent_message_id, filename, content_type, size, disposition, content_id, data)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [
+                sentMessageId,
+                att.filename || 'attachment',
+                att.contentType || 'application/octet-stream',
+                att.size || (att.content ? att.content.length : 0),
+                ((att as any).contentDisposition || (att as any).disposition || 'attachment'),
+                att.cid || null,
+                att.content || null,
+              ]
+            );
+          }
+        }
 
         await query(
           'UPDATE subdomains SET emails_sent_today = emails_sent_today + 1, total_sent = total_sent + 1 WHERE id = $1',
