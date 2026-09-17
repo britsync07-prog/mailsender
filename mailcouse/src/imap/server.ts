@@ -77,13 +77,21 @@ function parseListArgs(rest: string): { ref: string; pattern: string } {
 
 function parseFlags(input: string): string[] {
   const match = input.match(/\(([^)]*)\)/);
-  if (!match) return [];
-  return match[1].split(/\s+/).map((f) => f.trim()).filter(Boolean);
+  if (match) {
+    return match[1].split(/\s+/).map((f) => f.trim()).filter(Boolean);
+  }
+  const tokens = input.trim().split(/\s+/);
+  const flagIdx = tokens.findIndex((t) => /^[+-]?FLAGS(?:\.SILENT)?$/i.test(t));
+  if (flagIdx !== -1) {
+    return tokens.slice(flagIdx + 1).map((f) => f.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 function matchesRange(val: number, rangeStr: string, maxVal: number): boolean {
-  if (!rangeStr || rangeStr === '*') return maxVal > 0 ? val === maxVal : false;
-  if (rangeStr === '1:*') return val >= 1 && (maxVal === 0 || val <= maxVal);
+  const numVal = Number(val);
+  if (!rangeStr || rangeStr === '*') return maxVal > 0 ? numVal === maxVal : false;
+  if (rangeStr === '1:*') return numVal >= 1 && (maxVal === 0 || numVal <= maxVal);
   for (const part of rangeStr.split(',')) {
     const trimmed = part.trim();
     if (trimmed.includes(':')) {
@@ -92,17 +100,17 @@ function matchesRange(val: number, rangeStr: string, maxVal: number): boolean {
       const b = bRaw === '*' ? maxVal : parseInt(bRaw, 10);
       const min = Math.min(a, b);
       const max = Math.max(a, b);
-      if (val >= min && val <= max) return true;
+      if (numVal >= min && numVal <= max) return true;
     } else {
       const n = trimmed === '*' ? maxVal : parseInt(trimmed, 10);
-      if (val === n) return true;
+      if (numVal === n) return true;
     }
   }
   return false;
 }
 
 function formatFlags(flags: string[]): string {
-  return `(${(flags || []).join(' ')})`;
+  return `(${Array.from(new Set(flags || [])).join(' ')})`;
 }
 
 function write(socket: net.Socket, line: string): void {
@@ -335,7 +343,7 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     write(socket, `* ${stats.unseen} RECENT`);
     write(socket, `* OK [UIDVALIDITY ${stats.uidValidity}] UIDs valid`);
     write(socket, `* OK [UIDNEXT ${stats.uidNext}] Predicted next UID`);
-    write(socket, '* OK [PERMANENTFLAGS (\\Seen \\Answered \\Flagged \\Deleted \\Draft)] Flags permitted');
+    write(socket, '* OK [PERMANENTFLAGS (\\Seen \\Answered \\Flagged \\Deleted \\Draft \\*)] Flags permitted');
     return write(socket, `${tag} OK [READ-WRITE] ${command} completed`);
   }
 
@@ -380,9 +388,18 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
     const maxUid = messages.length > 0 ? Math.max(...messages.map((m) => m.uid)) : 0;
     const maxSeq = messages.length;
 
-    const matched = isUid
+    let matched = isUid
       ? messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid))
       : messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+
+    // Failsafe 1: if sequence-based STORE matched nothing, check if rangeStr matches msg.uid
+    if (!isUid && matched.length === 0) {
+      matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ msg }) => matchesRange(msg.uid, rangeStr, maxUid));
+    }
+    // Failsafe 2: if UID STORE matched nothing, check if rangeStr matches seq
+    if (isUid && matched.length === 0) {
+      matched = messages.map((msg, i) => ({ seq: i + 1, msg })).filter(({ seq }) => matchesRange(seq, rangeStr, maxSeq));
+    }
 
     console.log(`[MAILCOUSE IMAP STORE] Folder: ${state.selected!.name}, range: ${rangeStr}, mode: ${mode}, flags: [${newFlags.join(' ')}], matched: ${matched.length}/${messages.length}`);
 
@@ -391,13 +408,16 @@ async function handleCommand(socket: net.Socket, state: ImapSessionState, line: 
       if (mode.startsWith('+')) flags = Array.from(new Set([...flags, ...newFlags]));
       else if (mode.startsWith('-')) flags = flags.filter((f) => !newFlags.includes(f));
       else flags = newFlags;
+      msg.flags = flags;
       await setMessageFlags(state.selected!.id, msg.uid, flags);
       const attrs = isUid
         ? `UID ${msg.uid} FLAGS ${formatFlags(flags)}`
         : `FLAGS ${formatFlags(flags)}`;
-      write(socket, `* ${seq} FETCH (${attrs})`);
+      if (!mode.includes('.SILENT')) {
+        write(socket, `* ${seq} FETCH (${attrs})`);
+      }
     }
-    return write(socket, `${tag} OK ${command} completed`);
+    return write(socket, `${tag} OK ${isUid ? 'UID STORE' : 'STORE'} completed`);
   }
 
   if (command === 'SEARCH' || (command === 'UID' && rest.toUpperCase().startsWith('SEARCH '))) {

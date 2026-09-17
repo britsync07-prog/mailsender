@@ -191,4 +191,35 @@ describe('IMAP Server MOVE, COPY & EXPUNGE Commands', () => {
 
     client.end();
   });
+
+  it('should execute UID STORE +FLAGS (\\Seen) and update flags', async () => {
+    const { client } = await connectClient();
+
+    (authenticateMailbox as jest.Mock).mockResolvedValue({
+      id: 'mb-123',
+      email: 'test@example.com',
+      active: true,
+      imap_enabled: true,
+    });
+    await sendCommand(client, 'A01 LOGIN test@example.com pass123');
+    await sendCommand(client, 'A02 SELECT INBOX');
+
+    const mockMsg = { id: 'msg-1', uid: 42, flags: [] as string[], size: 120, raw_source: '...' };
+    (listMessagesBySequence as jest.Mock).mockResolvedValue([mockMsg]);
+
+    const storeRes = await sendCommand(client, 'A03 UID STORE 42 +FLAGS (\\Seen)');
+    expect(storeRes).toContain('* 1 FETCH (UID 42 FLAGS (\\Seen))');
+    expect(storeRes).toContain('A03 OK UID STORE completed');
+
+    const removeRes = await sendCommand(client, 'A04 UID STORE 42 -FLAGS (\\Seen)');
+    expect(removeRes).toContain('* 1 FETCH (UID 42 FLAGS ())');
+    expect(removeRes).toContain('A04 OK UID STORE completed');
+
+    const bareRes = await sendCommand(client, 'A05 UID STORE 42 +FLAGS \\Flagged');
+    expect(bareRes).toContain('* 1 FETCH (UID 42 FLAGS (\\Flagged))');
+    expect(bareRes).toContain('A05 OK UID STORE completed');
+
+    client.end();
+  });
 });
+
