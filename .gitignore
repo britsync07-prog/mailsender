@@ -14,24 +14,37 @@ build/
 # Logs
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
 
 # OS files
 .DS_Store
 Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+*.lnk
 
-# IDE
+# Office temporary lock files
+~$*
+
+# IDE & Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
 
 # Test coverage
 coverage/
 
-# DKIM keys (contains private keys)
+# DKIM keys & secrets (contains private keys)
 **/dkim-keys*.json
-
-# Credentials
+*.pem
+*.key
 credentials.txt
 
 # Temp
@@ -48,3 +61,11 @@ bin/
 **/tools/email-verifier/email-verifier
 **/tools/email-verifier/email-verifier.exe
 
+# Project Planning, Specification & Reference Folders
+/plans/
+/TSD_v3_final.docx
+/TSD_v3_final.txt
+*.docx
+/soruce/
+/soruce
+/source/

@@ -1,7 +1,7 @@
 {
   "name": "mailcouse",
   "version": "1.0.0",
-  "description": "",
+  "description": "Postal-inspired multi-tenant email delivery and cold-outreach infrastructure platform",
   "main": "index.js",
   "scripts": {
     "postinstall": "node scripts/build-verifier.js",
@@ -22,7 +22,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@types/express": "^5.0.6",

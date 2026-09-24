@@ -7,13 +7,13 @@
 
 > A self-hosted, Postal-inspired multi-tenant email delivery and cold-outreach infrastructure platform.
 
-MailSender (internal project name `mailcouse`) is a TypeScript email infrastructure system that replicates the core feature set of the open-source Postal mail server: multi-tenant organizations, scoped mail servers, an inbound SMTP relay, DKIM signing, domain/subdomain verification with live DNS checks, IP-style subdomain pools, message inspection, suppressions, and webhooks. It is driven by a formal Technical Specification Document (TSD v3) targeting engagement-first cold outreach at up to 100,000 emails/day across 50 root domains, with reputation-safe volume distribution via subdomain identities.
+MailSender (internal project name `mailcouse`) is a TypeScript email infrastructure system that replicates the core feature set of the open-source Postal mail server: multi-tenant organizations, scoped mail servers, an inbound SMTP relay, DKIM signing, domain/subdomain verification with live DNS checks, IP-style subdomain pools, message inspection, suppressions, and webhooks. It is architected for engagement-first cold outreach at up to 100,000 emails/day across 50 root domains, with reputation-safe volume distribution via subdomain identities.
 
 ## Overview
 
-The platform follows an "engagement-first" architecture defined in `TSD_v3_final.txt`: every sending identity stays under conservative per-SMTP daily caps (10 emails/day post-warmup, 200 subdomain SMTPs per root domain, 2,000 emails/domain/day total) so that behavioral trust is built before scale. The application implements the full delivery pipeline itself: lead ingestion with validation and deduplication, spintax content generation, queue-based dispatch through pooled subdomain credentials, IMAP-based bounce and reply detection, suppression handling, and a Postal-replica web UI built with EJS.
+The platform follows an "engagement-first" architecture: every sending identity stays under conservative per-SMTP daily caps (10 emails/day post-warmup, 200 subdomain SMTPs per root domain, 2,000 emails/domain/day total) so that behavioral trust is built before scale. The application implements the full delivery pipeline itself: lead ingestion with validation and deduplication, spintax content generation, queue-based dispatch through pooled subdomain credentials, IMAP-based bounce and reply detection, suppression handling, and a Postal-replica web UI built with EJS.
 
-Twenty numbered implementation plans (`plans/plan1.txt` ... `plan20.txt`) break the TSD into concrete engineering tasks (lead ingestion, validation stages, warmup scheduling, DNS provisioning, etc.), and `docs/superpowers/` holds detailed specs such as the domain/subdomain verification design.
+Detailed engineering specs and implementation designs for domain/subdomain verification, DNS pipelines, and relaying are documented under `docs/superpowers/`.
 
 ## Features
 
@@ -37,7 +37,7 @@ Twenty numbered implementation plans (`plans/plan1.txt` ... `plan20.txt`) break 
 
 | Layer | Technology |
 | --- | --- |
-| Language | TypeScript (Node.js, CommonJS) |
+| Language | TypeScript (Node.js, CommonJS), Go (verifier utility) |
 | Web framework | Express 5, express-ejs-layouts, EJS views |
 | SMTP | smtp-server (relay), nodemailer (submission) |
 | IMAP / Parsing | imap server module, mailparser |
@@ -48,7 +48,7 @@ Twenty numbered implementation plans (`plans/plan1.txt` ... `plan20.txt`) break 
 | DNS / Deliverability | Cloudflare API (node-fetch), custom dkim/dns modules, MXToolbox checks |
 | Notifications | Telegram Bot API |
 | Testing | Jest, ts-jest, Supertest |
-| Docs | TSD v3 specification, plans/, docs/superpowers specs |
+| Docs | Architecture specs, docs/superpowers specs, API schema |
 
 ## Architecture
 
@@ -56,49 +56,44 @@ The entrypoint (`src/index.ts`) wires Express middleware (helmet, compression, m
 
 Outbound flow: lead selection and segmentation -> content builder (spintax personalization) -> queue worker -> connection-pooled sender bound to the correct outbound IPv4/IPv6 -> DKIM signature applied -> delivery through the per-traffic-class SMTP port -> session logging and retry management. Inbound feedback flow: IMAP fetch -> parse -> bounce/complaint classification -> suppression update -> counter/engagement metrics -> dashboard and Telegram alerts.
 
-Domain trust flow: Cloudflare provisioning creates verification, SPF, DKIM, and return-path records; the verifier performs live DNS checks with normalized hostnames; the subdomain resolver picks the longest verified match so subdomains inherit the root domain's DKIM identity without multiplying reputation units (root-domain reputation is shared across all 200 subdomains per TSD capacity formula).
+Domain trust flow: Cloudflare provisioning creates verification, SPF, DKIM, and return-path records; the verifier performs live DNS checks with normalized hostnames; the subdomain resolver picks the longest verified match so subdomains inherit the root domain's DKIM identity without multiplying reputation units (root-domain reputation is shared across all 200 subdomains per capacity formula).
 
 ## Project Structure
 
 ```text
 mailsender/
-+-- README.md
-+-- TSD_v3_final.docx / TSD_v3_final.txt   # Technical Specification Document v3
-+-- docs/
-�   +-- superpowers/
-�       +-- plans/                         # e.g. domain-subdomain-setup plan
-�       +-- specs/                         # design specs (verification, relaying)
-+-- plans/                                 # plan1..plan20 implementation task lists
-+-- soruce/
-�   +-- postal/                            # Postal reference material
-+-- mailcouse/                             # the application
-    +-- package.json                       # build/dev/test/provisioning scripts
-    +-- jest.config.js, tsconfig.json
-    +-- scripts/copy-assets.js
-    +-- src/
-        +-- index.ts                       # Express bootstrap, portal UI, lifecycle
-        +-- api/                           # REST + portal routes, domain logic, auth
-        +-- smtp/                          # relay, connection pool, email builder,
-        �                                  #   ip-selector, retry-manager, sender
-        +-- warmup/                        # scheduler, gate, activator, monitor
-        +-- dns/                           # provisioner, record-builder, verifier
-        +-- dkim/                          # signing + key encryption
-        +-- bounce/ complaint/             # feedback loops
-        +-- imap/ ingestion/               # mailbox polling, lead sources
-        +-- validation/                    # staged lead validation
-        +-- verification/                  # pre-send verification client, cache & policy
-        +-- segmentation/ suppression/     # audience + exclusion management
-        +-- content/                       # spintax rendering
-        +-- queue/ worker/ cron/           # dispatch pipeline
-        +-- engagement/ fingerprint/       # opens, clicks, threading
-        +-- counters/ monitoring/          # metrics + HTML dashboard
-        +-- cloudflare/                    # DNS API client
-        +-- db/ config/ scripts/           # pool, typed config, seed/provision CLIs
-        +-- public/ views/                 # Postal-replica assets and EJS templates
-        +-- **/__tests__/                  # colocated Jest suites
-+-- email-verifier-service/                # Go microservice (AfterShip/email-verifier engine)
-    +-- config/ handlers/ metrics/ middleware/ policy/ verifier/
-    +-- Dockerfile, docker-compose.yml, email-verifier.service
+├── README.md                              # Project documentation & setup guide
+├── LICENSE                                # MIT license
+├── docs/
+│   └── superpowers/
+│       ├── plans/                         # Domain and subdomain setup plans
+│       └── specs/                         # Design specs (verification, relaying)
+└── mailcouse/                             # MailSender application core
+    ├── package.json                       # Build, test, and provisioning scripts
+    ├── jest.config.js, tsconfig.json
+    ├── scripts/                           # Asset copying and build scripts
+    ├── tools/
+    │   └── email-verifier/                # High-performance Go email verification tool
+    └── src/
+        ├── index.ts                       # Express bootstrap, portal UI, lifecycle
+        ├── api/                           # REST + portal routes, domain logic, auth
+        ├── smtp/                          # Relay, connection pool, email builder, sender
+        ├── warmup/                        # Scheduler, gate, activator, monitor
+        ├── dns/                           # Provisioner, record builder, verifier
+        ├── dkim/                          # Signing + key encryption
+        ├── bounce/ complaint/             # Feedback loops & error handling
+        ├── imap/ ingestion/               # Mailbox polling, lead sources
+        ├── validation/                    # Staged email and MX validation
+        ├── verification/                  # Pre-send verification client, cache & policy
+        ├── segmentation/ suppression/     # Audience + exclusion management
+        ├── content/                       # Spintax rendering engine
+        ├── queue/ worker/ cron/           # Asynchronous dispatch pipeline
+        ├── engagement/ fingerprint/       # Opens, clicks, threading, reply tracking
+        ├── counters/ monitoring/          # Metrics + HTML dashboard
+        ├── cloudflare/                    # Cloudflare DNS API client
+        ├── db/ config/ scripts/           # DB pool, typed config, seed/provision CLIs
+        ├── public/ views/                 # Postal-replica assets and EJS templates
+        └── **/__tests__/                  # Unit and integration test suites
 ```
 
 ## Getting Started
@@ -178,7 +173,7 @@ No docker-compose file ships with this repository; deployment targets a dedicate
 
 - **SMTP handler hung on handshake**: the relay stalled when clients sent multi-line EHLO replies. **Solution**: rewrote the EHLO parsing path in the SMTP handler so continuation lines are consumed correctly (commit `fix: SMTP handler no longer hangs (multi-line EHLO fix)`), then added DKIM signing and SPF root-domain envelope-from in the same pass.
 - **Subdomain sending had no trust model**: messages from `sub.example.com` were rejected or mis-signed even when the parent domain was verified. **Solution**: centralized subdomain matching into a resolver that selects the longest verified parent domain, normalized trailing dots returned by nameservers during DNS checks, and routed both the portal send route and the relay's `onData` handler through it (commits around `feat: use subdomain-aware resolver ...` and `feat: centralize subdomain matching ...`).
-- **Reputation math misunderstood**: treating 200 subdomains as 200 independent reputations would have destroyed deliverability. **Solution**: encoded the TSD capacity formula (2,000 emails/day ceiling shared per root domain) into provisioning limits and warmup gates rather than allowing unlimited per-subdomain volume.
+- **Reputation math misunderstood**: treating 200 subdomains as 200 independent reputations would have destroyed deliverability. **Solution**: encoded the capacity formula (2,000 emails/day ceiling shared per root domain) into provisioning limits and warmup gates rather than allowing unlimited per-subdomain volume.
 - **Build output incomplete**: `tsc` did not emit static assets, leaving the portal without CSS/JS in production. **Solution**: added a `copy-assets` step to the build script and a fix commit ensuring assets land in `dist/` (`fix: copy static assets to dist ...`).
 - **Header fidelity and spoofing**: forwarded messages lost their original `From` header, and unverified domains could still submit mail. **Solution**: preserved original `From` passthrough and hard-rejected unverified domains at relay time; later accepted RFC display-name format (`Name <address>`) on the web send form.
 - **Live delivery failed over IPv6**: outbound connections preferred broken IPv6 routes on some VPSes. **Solution**: forced outbound binding via IPv4 (`OUTBOUND_IPV4`/`OUTBOUND_LOCAL_ADDRESS`) together with enabling STARTTLS on the relay (`fix: enable SMTP STARTTLS, live delivery via IPv4 ...`).
@@ -187,11 +182,10 @@ No docker-compose file ships with this repository; deployment targets a dedicate
 
 ## Known Limitations & Roadmap
 
-- Warmup currently leans on an external Warmbox API for part of the ramp; the internal scheduler/gate should fully own warming in future phases.
-- Phase 2 scale target (75 domains / 150k emails/day) requires additional IP pools and per-pool routing beyond the current subdomain pool model.
-- The Postal reference in `soruce/postal` is material only; feature parity is partial (no full inbound message routing rules engine yet).
-- Repository hygiene: the top-level directory `soruce/` is a misspelling of `source/`, several git commit messages are placeholder noise, and licensing has been standardized as MIT (see [LICENSE](./LICENSE)) instead of the ISC declared in package.json.
-- Roadmap candidates: per-tenant IP pool management UI, reply categorization ML, deeper webhook retry policies, and Prometheus metrics export.
+- Warmup currently integrates with an external Warmbox API for ramping; expanding the native autonomous warm-up engine is planned for future phases.
+- Phase 2 scale target (75 domains / 150k emails/day) will introduce dynamic multi-IP pool management and automated IP-reputation routing.
+- Advanced routing: extending the inbound message pipeline with a visual routing rules engine.
+- Roadmap candidates: per-tenant IP pool management UI, AI-powered reply categorization, granular webhook retry policies, and Prometheus metrics export.
 
 ## Security Notes
 
@@ -202,4 +196,5 @@ No docker-compose file ships with this repository; deployment targets a dedicate
 - CSP and cross-origin embedder policies are intentionally relaxed for the embedded Postal-replica UI; tighten before exposing the portal publicly.
 
 ## License
-MIT License � Copyright (c) 2026 Musfiqur Rahman Saimon. See [LICENSE](./LICENSE).
+
+MIT License © 2026 Musfiqur Rahman Saimon. See [LICENSE](./LICENSE).
